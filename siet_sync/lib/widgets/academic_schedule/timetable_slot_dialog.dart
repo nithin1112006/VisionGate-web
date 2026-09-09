@@ -154,6 +154,12 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
     return f['dept']?.toString() ?? '';
   }
 
+  bool _isLabVenue(dynamic type) {
+    if (type == null) return false;
+    final t = type.toString().toUpperCase();
+    return t == 'LAB' || t == 'LABORATORY' || t == 'WORKSHOP' || t.contains('LAB');
+  }
+
   void _openCurriculumPickerModal() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     String searchQuery = '';
@@ -1078,7 +1084,7 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final dynamicVenues = _registeredVenues.isNotEmpty
         ? _registeredVenues
-            .where((v) => _isLab ? (v['venue_type'] == 'LABORATORY' || v['venue_type'] == 'WORKSHOP') : (v['venue_type'] != 'LABORATORY' && v['venue_type'] != 'WORKSHOP'))
+            .where((v) => _isLab ? _isLabVenue(v['venue_type']) : !_isLabVenue(v['venue_type']))
             .map((v) => v['venue_code']?.toString() ?? '')
             .where((c) => c.isNotEmpty)
             .toList()
@@ -1120,10 +1126,14 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Curriculum Subject *',
-                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AdminColors.getTextSecondary(isDark)),
+                    Flexible(
+                      child: Text(
+                        'Curriculum Subject *',
+                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: AdminColors.getTextSecondary(isDark)),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     TextButton.icon(
                       onPressed: _openCurriculumPickerModal,
                       icon: const Icon(Icons.auto_stories_rounded, size: 14),
@@ -1322,8 +1332,14 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                             children: [
                               const Icon(Icons.person_search_rounded, size: 18, color: AdminColors.primary),
                               const SizedBox(width: 8),
-                              Text('Click to Choose Faculty (Search any Dept)...', style: GoogleFonts.inter(fontSize: 13, color: AdminColors.getTextSecondary(isDark))),
-                              const Spacer(),
+                              Expanded(
+                                child: Text(
+                                  'Click to Choose Faculty (Search any Dept)...',
+                                  style: GoogleFonts.inter(fontSize: 13, color: AdminColors.getTextSecondary(isDark)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
                               const Icon(Icons.arrow_drop_down_rounded),
                             ],
                           ),
@@ -1367,7 +1383,7 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                         onSelected: (option) {
                           final vCode = (option['venue_code'] ?? '').toString();
                           final vType = (option['venue_type'] ?? '').toString().toUpperCase();
-                          final isLabItem = vType == 'LABORATORY' || vType == 'WORKSHOP';
+                          final isLabItem = _isLabVenue(vType);
                           setState(() {
                             _roomCtrl.text = vCode;
                             if (isLabItem) {
@@ -1471,7 +1487,7 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                                           final vCode = (v['venue_code'] ?? '').toString();
                                           final vName = (v['venue_name'] ?? '').toString();
                                           final vType = (v['venue_type'] ?? 'LECTURE_HALL').toString().toUpperCase();
-                                          final isLabItem = vType == 'LABORATORY' || vType == 'WORKSHOP';
+                                          final isLabItem = _isLabVenue(vType);
                                           final isSelected = _roomCtrl.text.trim().toLowerCase() == vCode.toLowerCase();
 
                                           final typeColor = isLabItem
@@ -1580,17 +1596,21 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                         const SizedBox(width: 8),
                         Text('Lab Block Duration:', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
                         const SizedBox(width: 10),
-                        DropdownButton<int>(
-                          value: [1, 2, 3, 4].contains(_spanPeriods) ? _spanPeriods : 1,
-                          isDense: true,
-                          underline: const SizedBox(),
-                          items: const [
-                            DropdownMenuItem(value: 1, child: Text('1 Period')),
-                            DropdownMenuItem(value: 2, child: Text('2 Periods (Consecutive)')),
-                            DropdownMenuItem(value: 3, child: Text('3 Periods (Full Block)')),
-                            DropdownMenuItem(value: 4, child: Text('4 Periods (Extended Lab)')),
-                          ],
-                          onChanged: (v) => setState(() => _spanPeriods = v ?? 1),
+                        Expanded(
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              value: [1, 2, 3, 4].contains(_spanPeriods) ? _spanPeriods : 1,
+                              isDense: true,
+                              isExpanded: true,
+                              items: const [
+                                DropdownMenuItem(value: 1, child: Text('1 Period')),
+                                DropdownMenuItem(value: 2, child: Text('2 Periods (Consecutive)')),
+                                DropdownMenuItem(value: 3, child: Text('3 Periods (Full Block)')),
+                                DropdownMenuItem(value: 4, child: Text('4 Periods (Extended Lab)')),
+                              ],
+                              onChanged: (v) => setState(() => _spanPeriods = v ?? 1),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1612,7 +1632,7 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                             orElse: () => {},
                           );
                           final vType = (vObj['venue_type'] ?? '').toString().toUpperCase();
-                          final isLabItem = vType == 'LABORATORY' || vType == 'WORKSHOP';
+                          final isLabItem = _isLabVenue(vType);
                           setState(() {
                             _roomCtrl.text = venue;
                             if (isLabItem) {
@@ -1677,18 +1697,35 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
         ),
       ),
       actions: [
-        if (widget.initialSlot != null)
-          TextButton.icon(
-            onPressed: _isSaving ? null : _clearSlot,
-            icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AdminColors.danger),
-            label: const Text('Clear Slot', style: TextStyle(color: AdminColors.danger)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: [
+              if (widget.initialSlot != null)
+                TextButton.icon(
+                  onPressed: _isSaving ? null : _clearSlot,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AdminColors.danger),
+                  label: const Text('Clear Slot', style: TextStyle(color: AdminColors.danger)),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: GoogleFonts.inter(color: AdminColors.getTextSecondary(isDark))),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _isSaving ? null : () => _saveSlot(allowOverride: false),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AdminColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: _isSaving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Save Slot'),
+              ),
+            ],
           ),
-        const Spacer(),
-        TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: GoogleFonts.inter(color: AdminColors.getTextSecondary(isDark)))),
-        ElevatedButton(
-          onPressed: _isSaving ? null : () => _saveSlot(allowOverride: false),
-          style: ElevatedButton.styleFrom(backgroundColor: AdminColors.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-          child: _isSaving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Save Slot'),
         ),
       ],
     );
