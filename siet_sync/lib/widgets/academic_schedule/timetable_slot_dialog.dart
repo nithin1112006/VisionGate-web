@@ -1101,8 +1101,11 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
           ),
         ],
       ),
-      content: SizedBox(
+      content: Container(
         width: 520,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.95,
+        ),
         child: Form(
           key: _formKey,
           child: SingleChildScrollView(
@@ -1316,8 +1319,13 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
                             children: [
                               const Icon(Icons.person_search_rounded, size: 18, color: AdminColors.primary),
                               const SizedBox(width: 8),
-                              Text('Click to Choose Faculty (Search any Dept)...', style: GoogleFonts.inter(fontSize: 13, color: AdminColors.getTextSecondary(isDark))),
-                              const Spacer(),
+                              Expanded(
+                                child: Text(
+                                  'Click to Choose Faculty (Search any Dept)...',
+                                  style: GoogleFonts.inter(fontSize: 13, color: AdminColors.getTextSecondary(isDark)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                               const Icon(Icons.arrow_drop_down_rounded),
                             ],
                           ),
@@ -1688,18 +1696,35 @@ class _TimetableSlotDialogState extends State<TimetableSlotDialog> {
         ),
       ),
       actions: [
-        if (widget.initialSlot != null)
-          TextButton.icon(
-            onPressed: _isSaving ? null : _clearSlot,
-            icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AdminColors.danger),
-            label: const Text('Clear Slot', style: TextStyle(color: AdminColors.danger)),
+        SizedBox(
+          width: double.infinity,
+          child: Row(
+            children: [
+              if (widget.initialSlot != null)
+                TextButton.icon(
+                  onPressed: _isSaving ? null : _clearSlot,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AdminColors.danger),
+                  label: const Text('Clear Slot', style: TextStyle(color: AdminColors.danger)),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: GoogleFonts.inter(color: AdminColors.getTextSecondary(isDark))),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _isSaving ? null : () => _saveSlot(allowOverride: false),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AdminColors.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: _isSaving
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Save Slot'),
+              ),
+            ],
           ),
-        const Spacer(),
-        TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: GoogleFonts.inter(color: AdminColors.getTextSecondary(isDark)))),
-        ElevatedButton(
-          onPressed: _isSaving ? null : () => _saveSlot(allowOverride: false),
-          style: ElevatedButton.styleFrom(backgroundColor: AdminColors.primary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-          child: _isSaving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Save Slot'),
         ),
       ],
     );
