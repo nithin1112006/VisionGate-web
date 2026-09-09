@@ -204,36 +204,60 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
     final bool isPermission = rawStatusLower.contains('permission') || leaveTypeLower.contains('permission') || rawStatusLower.contains('gate');
 
     // 1. Resolve Half 1 (FN)
-    String fhStatus = log['first_half_status']?.toString() ?? '';
-    if (isOD) {
-      fhStatus = 'OD';
+    final rawFh = log['first_half_status']?.toString();
+    final rawSh = log['second_half_status']?.toString();
+    final whichHalf = (log['which_half'] ?? '').toString().toLowerCase();
+
+    String fhStatus = '';
+    if (rawFh != null && rawFh.isNotEmpty && rawFh != 'null') {
+      fhStatus = rawFh;
+    } else if (isOD) {
+      if (isHalfDayRaw && (session == 'AN' || rawStatusLower.contains('an') || whichHalf == 'second')) {
+        fhStatus = (isFnPresent || rawFh?.toLowerCase() == 'present') ? 'Present' : (isFnTimelineOver ? 'Absent' : 'Pending');
+      } else {
+        fhStatus = 'OD';
+      }
     } else if (isLeave) {
-      fhStatus = 'Leave';
+      if (isHalfDayRaw && (session == 'AN' || rawStatusLower.contains('an') || whichHalf == 'second')) {
+        fhStatus = (isFnPresent || rawFh?.toLowerCase() == 'present') ? 'Present' : (isFnTimelineOver ? 'Absent' : 'Pending');
+      } else {
+        fhStatus = 'Leave';
+      }
     } else if (isPermission) {
       fhStatus = 'Permission';
     } else if (isHoliday) {
       fhStatus = 'Holiday';
-    } else if (isFnPresent || fhStatus.toLowerCase() == 'present') {
+    } else if (isFnPresent || rawFh?.toLowerCase() == 'present') {
       fhStatus = 'Present';
-    } else if (isFnTimelineOver || fhStatus == 'Absent' || rawStatusLower == 'absent' || source == 'absent') {
+    } else if (isFnTimelineOver || rawStatusLower == 'absent' || source == 'absent') {
       fhStatus = 'Absent';
     } else {
       fhStatus = 'Pending';
     }
 
     // 2. Resolve Half 2 (AN)
-    String shStatus = log['second_half_status']?.toString() ?? '';
-    if (isOD) {
-      shStatus = 'OD';
+    String shStatus = '';
+    if (rawSh != null && rawSh.isNotEmpty && rawSh != 'null') {
+      shStatus = rawSh;
+    } else if (isOD) {
+      if (isHalfDayRaw && (session == 'FN' || rawStatusLower.contains('fn') || whichHalf == 'first')) {
+        shStatus = (isAnPresent || rawSh?.toLowerCase() == 'present') ? 'Present' : (isAnTimelineOver ? 'Absent' : 'Pending');
+      } else {
+        shStatus = 'OD';
+      }
     } else if (isLeave) {
-      shStatus = 'Leave';
+      if (isHalfDayRaw && (session == 'FN' || rawStatusLower.contains('fn') || whichHalf == 'first')) {
+        shStatus = (isAnPresent || rawSh?.toLowerCase() == 'present') ? 'Present' : (isAnTimelineOver ? 'Absent' : 'Pending');
+      } else {
+        shStatus = 'Leave';
+      }
     } else if (isPermission) {
       shStatus = 'Permission';
     } else if (isHoliday) {
       shStatus = 'Holiday';
-    } else if (isAnPresent || shStatus.toLowerCase() == 'present') {
+    } else if (isAnPresent || rawSh?.toLowerCase() == 'present') {
       shStatus = 'Present';
-    } else if (isAnTimelineOver || shStatus == 'Absent' || rawStatusLower == 'absent' || source == 'absent') {
+    } else if (isAnTimelineOver || rawStatusLower == 'absent' || source == 'absent') {
       shStatus = 'Absent';
     } else {
       shStatus = 'Pending';
@@ -245,13 +269,16 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
     String statusTitle;
     double effectiveVal;
 
-    if (isOD) {
+    final bool isBothOD = fhStatus == 'OD' && shStatus == 'OD';
+    final bool isBothLeave = fhStatus == 'Leave' && shStatus == 'Leave';
+
+    if (isBothOD) {
       statusColor = const Color(0xFF2563EB);
       statusIcon = Icons.verified_user_rounded;
       final odCategory = leaveType.isNotEmpty ? leaveType : 'Academic';
       statusTitle = 'On Duty ($odCategory)';
       effectiveVal = 1.0;
-    } else if (isLeave) {
+    } else if (isBothLeave) {
       statusColor = const Color(0xFF8B5CF6);
       statusIcon = Icons.beach_access_rounded;
       final leaveCategory = leaveType.isNotEmpty ? leaveType : 'Leave';
@@ -272,6 +299,31 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
       statusIcon = Icons.check_circle_rounded;
       statusTitle = 'Present (Full Day)';
       effectiveVal = 1.0;
+    } else if ((fhStatus == 'Present' && shStatus == 'OD') || (fhStatus == 'OD' && shStatus == 'Present')) {
+      statusColor = const Color(0xFF10B981);
+      statusIcon = Icons.check_circle_rounded;
+      statusTitle = fhStatus == 'OD' ? 'Present (OD FN)' : 'Present (OD AN)';
+      effectiveVal = 1.0;
+    } else if (fhStatus == 'OD') {
+      statusColor = const Color(0xFF2563EB);
+      statusIcon = Icons.verified_user_rounded;
+      statusTitle = 'Half Day OD (FN)';
+      effectiveVal = 0.5;
+    } else if (shStatus == 'OD') {
+      statusColor = const Color(0xFF2563EB);
+      statusIcon = Icons.verified_user_rounded;
+      statusTitle = 'Half Day OD (AN)';
+      effectiveVal = 0.5;
+    } else if (fhStatus == 'Present' && shStatus == 'Leave') {
+      statusColor = const Color(0xFFF59E0B);
+      statusIcon = Icons.timelapse_rounded;
+      statusTitle = 'Half Day Present (FN)';
+      effectiveVal = 0.5;
+    } else if (fhStatus == 'Leave' && shStatus == 'Present') {
+      statusColor = const Color(0xFFF59E0B);
+      statusIcon = Icons.timelapse_rounded;
+      statusTitle = 'Half Day Present (AN)';
+      effectiveVal = 0.5;
     } else if (fhStatus == 'Present' && (shStatus == 'Absent' || shStatus == 'Pending')) {
       statusColor = const Color(0xFFF59E0B);
       statusIcon = Icons.timelapse_rounded;
@@ -282,6 +334,16 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
       statusIcon = Icons.timelapse_rounded;
       statusTitle = 'Half Day Present (AN)';
       effectiveVal = 0.5;
+    } else if (fhStatus == 'Leave') {
+      statusColor = const Color(0xFF8B5CF6);
+      statusIcon = Icons.beach_access_rounded;
+      statusTitle = 'Half Day Leave (FN)';
+      effectiveVal = 0.0;
+    } else if (shStatus == 'Leave') {
+      statusColor = const Color(0xFF8B5CF6);
+      statusIcon = Icons.beach_access_rounded;
+      statusTitle = 'Half Day Leave (AN)';
+      effectiveVal = 0.0;
     } else if (fhStatus == 'Pending' && shStatus == 'Pending') {
       statusColor = const Color(0xFFF59E0B);
       statusIcon = Icons.schedule_rounded;
@@ -325,9 +387,10 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
       final dateOnly = ts.length >= 10 ? ts.substring(0, 10) : ts;
       final sessionKey = (mapLog['session_type'] ?? mapLog['session'] ?? mapLog['slot_half'] ?? mapLog['punch_type'] ?? '').toString().toUpperCase();
       
-      final key = id.isNotEmpty ? 'id_$id' : '${regNo}_${dateOnly}_$sessionKey';
+      final hasDailyHalves = mapLog.containsKey('first_half_status') || mapLog.containsKey('second_half_status');
+      final key = hasDailyHalves ? 'daily_${regNo}_$dateOnly' : (id.isNotEmpty ? 'id_$id' : '${regNo}_${dateOnly}_$sessionKey');
       
-      if (!uniqueMap.containsKey(key) || (mapLog['source'] == 'face_scan')) {
+      if (!uniqueMap.containsKey(key) || hasDailyHalves || (mapLog['source'] == 'face_scan')) {
         uniqueMap[key] = mapLog;
       }
     }
@@ -348,13 +411,11 @@ class _AttendanceLogTabState extends State<AttendanceLogTab> {
     for (var log in sortedLogs) {
       final resolved = _resolveAttendanceStatus(log);
       final effVal = (resolved['effectiveVal'] as num?)?.toDouble() ?? 0.0;
-      final isOD = resolved['isOD'] == true;
-      final isLeave = resolved['isLeave'] == true;
       final title = (resolved['statusTitle'] ?? '').toString();
 
-      if (isOD) {
+      if (title.startsWith('On Duty') || title == 'On Duty (OD)') {
         od++;
-      } else if (isLeave) {
+      } else if (title.startsWith('On Leave') || title.startsWith('Half Day Leave')) {
         l++;
       } else if (effVal == 1.0 && !title.contains('Half')) {
         p++;

@@ -20,7 +20,9 @@ def hash_pw(pw):
 
 
 def run_seed():
-    print("Starting database seeding...")
+    """Database auto-seeding is permanently disabled."""
+    print("ℹ️ Database auto-seeding is permanently disabled. No demo records will be inserted.")
+    return
 
     # 1. Seed Departments
     depts = [
@@ -37,9 +39,9 @@ def run_seed():
     inserted_depts = 0
     for d in depts:
         try:
-            cursor.execute('SELECT id FROM departments WHERE name = %s OR dept_name = %s', (d, d))
+            cursor.execute('SELECT id FROM departments WHERE name = %s', (d,))
             if not cursor.fetchone():
-                cursor.execute('INSERT INTO departments (name, dept_name) VALUES (%s, %s)', (d, d))
+                cursor.execute('INSERT INTO departments (name) VALUES (%s)', (d,))
                 inserted_depts += 1
         except Exception as e:
             print(f"Error seeding dept {d}: {e}")
@@ -75,14 +77,20 @@ def run_seed():
     inserted_users = 0
     for uname, pw, reg, name, dept, role, cb in users:
         try:
-            cursor.execute('SELECT id FROM users WHERE username = ? OR LOWER(reg_no) = LOWER(?)', (uname, reg))
-            if not cursor.fetchone():
-                h = hash_pw(pw)
+            cursor.execute('SELECT id FROM users WHERE username = %s OR LOWER(reg_no) = LOWER(%s)', (uname, reg))
+            row = cursor.fetchone()
+            h = hash_pw(pw)
+            if not row:
                 cursor.execute(
-                    'INSERT INTO users (username, password_hash, reg_no, name, dept, role, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO users (username, password_hash, reg_no, name, dept, role, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                     (uname, h, reg, name, dept, role, cb)
                 )
                 inserted_users += 1
+            elif uname == 'admin':
+                cursor.execute(
+                    'UPDATE users SET password_hash = %s WHERE username = %s OR LOWER(reg_no) = LOWER(%s)',
+                    (h, uname, reg)
+                )
         except Exception as e:
             print(f"Error seeding user {uname}: {e}")
     print(f"Users: {inserted_users} inserted.")
@@ -98,11 +106,11 @@ def run_seed():
     inserted_other = 0
     for uname, pw, reg, name, dob, role, dept, cb in other_staff:
         try:
-            cursor.execute('SELECT id FROM other_staff WHERE username = ? OR LOWER(reg_no) = LOWER(?)', (uname, reg))
+            cursor.execute('SELECT id FROM other_staff WHERE username = %s OR LOWER(reg_no) = LOWER(%s)', (uname, reg))
             if not cursor.fetchone():
                 h = hash_pw(pw)
                 cursor.execute(
-                    'INSERT INTO other_staff (username, password_hash, reg_no, name, dob, role, dept, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO other_staff (username, password_hash, reg_no, name, dob, role, dept, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
                     (uname, h, reg, name, dob, role, dept, cb)
                 )
                 inserted_other += 1
@@ -168,30 +176,30 @@ def run_seed():
 
     for reg, name, dept, reg_by in students_data:
         try:
-            cursor.execute('SELECT reg_no FROM student_face_profiles WHERE LOWER(reg_no) = LOWER(?)', (reg,))
+            cursor.execute('SELECT reg_no FROM student_face_profiles WHERE LOWER(reg_no) = LOWER(%s)', (reg,))
             if not cursor.fetchone():
                 cursor.execute(
-                    'INSERT INTO student_face_profiles (reg_no, name, dept, registered_by, embeddings) VALUES (?, ?, ?, ?, ?)',
+                    'INSERT INTO student_face_profiles (reg_no, name, dept, registered_by, embeddings) VALUES (%s, %s, %s, %s, %s)',
                     (reg, name, dept, reg_by, '[]')
                 )
                 inserted_students += 1
 
-            cursor.execute('SELECT reg_no FROM students WHERE LOWER(reg_no) = LOWER(?)', (reg,))
+            cursor.execute('SELECT reg_no FROM students WHERE LOWER(reg_no) = LOWER(%s)', (reg,))
             if not cursor.fetchone():
                 cursor.execute(
                     '''
                     INSERT INTO students (
                         reg_no, roll_no, name, email, phone_number, dob, gender, blood_group,
-                        degree, dept, batch, year, year_of_study, semester, section, quota, mentor_staff_reg_no,
+                        degree, dept, batch, year_of_study, semester, section, quota, mentor_staff_reg_no,
                         father_name, mother_name, parent_phone, parent_email, emergency_contact,
                         permanent_address, city, state, pincode, password_hash, first_time_login,
                         registered_by, registered_role
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''',
                     (
                         reg, f"R_{reg[-4:]}", name, f"{reg.lower()}@college.edu", "9876543210",
-                        "2004-06-15", "Male", "O+", "B.E.", dept, "2022-2026", 3, 3, 6, "A", "Govt", reg_by,
+                        "2004-06-15", "Male", "O+", "B.E.", dept, "2022-2026", 3, 6, "A", "Govt", reg_by,
                         "Parent Name", "Mother Name", "9876543210", "parent@gmail.com", "9876543210",
                         "123 University Campus Road", "Coimbatore", "Tamil Nadu", "641001",
                         default_pw_hash, True, reg_by, "staff"
@@ -211,7 +219,7 @@ def run_seed():
 
     for d in depts:
         try:
-            cursor.execute("SELECT id FROM academic_period_configs WHERE LOWER(dept) = LOWER(?)", (d,))
+            cursor.execute("SELECT id FROM academic_period_configs WHERE LOWER(dept) = LOWER(%s)", (d,))
             if not cursor.fetchone():
                 cursor.execute(
                     """
@@ -219,7 +227,7 @@ def run_seed():
                         dept, semester_type, start_time, total_periods, period_duration_mins,
                         working_days, breaks_json, updated_by
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (d, 'all', '08:45', 7, 50, default_days, default_breaks, 'SYSTEM')
                 )
@@ -237,7 +245,7 @@ def run_seed():
     for dept, batch, yr, sem, sec, staff_reg, adv_type, ac_yr in advisors_data:
         try:
             cursor.execute(
-                "SELECT id FROM class_advisors WHERE LOWER(dept) = LOWER(?) AND batch = ? AND semester = ? AND LOWER(section) = LOWER(?) AND advisor_type = ?",
+                "SELECT id FROM class_advisors WHERE LOWER(dept) = LOWER(%s) AND batch = %s AND semester = %s AND LOWER(section) = LOWER(%s) AND advisor_type = %s",
                 (dept, batch, sem, sec, adv_type)
             )
             if not cursor.fetchone():
@@ -247,7 +255,7 @@ def run_seed():
                         dept, batch, year_of_study, semester, section, staff_reg_no,
                         advisor_type, academic_year, assigned_by, assigned_role
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SYSTEM', 'admin')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'SYSTEM', 'admin')
                     """,
                     (dept, batch, yr, sem, sec, staff_reg, adv_type, ac_yr)
                 )

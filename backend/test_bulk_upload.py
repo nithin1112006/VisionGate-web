@@ -232,41 +232,41 @@ async def run_tests():
     test_reg = "TEST_DEL_0001"
     
     # Pre-clean
-    cursor.execute("DELETE FROM attendance WHERE reg_no = ?", (test_reg,))
-    cursor.execute("DELETE FROM leave_requests WHERE user_reg_no = ?", (test_reg,))
-    cursor.execute("DELETE FROM face_reregister_requests WHERE staff_reg_no = ?", (test_reg,))
+    cursor.execute("DELETE FROM attendance WHERE reg_no = %s", (test_reg,))
+    cursor.execute("DELETE FROM leave_requests WHERE user_reg_no = %s", (test_reg,))
+    cursor.execute("DELETE FROM face_reregister_requests WHERE staff_reg_no = %s", (test_reg,))
     
     # Insert mock entries
     cursor.execute(
-        "INSERT INTO attendance (reg_no, name, dept, timestamp) VALUES (?, 'Test Delete', 'Admin', CURRENT_TIMESTAMP)",
+        "INSERT INTO attendance (reg_no, name, dept, timestamp) VALUES (%s, 'Test Delete', 'Admin', CURRENT_TIMESTAMP)",
         (test_reg,)
     )
     cursor.execute(
-        "INSERT INTO leave_requests (user_reg_no, user_name, dept, leave_type, start_date, end_date, reason) VALUES (?, 'Test Delete', 'Admin', 'casual', '2026-06-18', '2026-06-19', 'Reason')",
+        "INSERT INTO leave_requests (user_reg_no, user_name, dept, leave_type, start_date, end_date, reason) VALUES (%s, 'Test Delete', 'Admin', 'casual', '2026-06-18', '2026-06-19', 'Reason')",
         (test_reg,)
     )
     cursor.execute(
-        "INSERT INTO face_reregister_requests (staff_reg_no, staff_name, dept, status) VALUES (?, 'Test Delete', 'Admin', 'pending')",
+        "INSERT INTO face_reregister_requests (staff_reg_no, staff_name, dept, status) VALUES (%s, 'Test Delete', 'Admin', 'pending')",
         (test_reg,)
     )
     
     # Verify they were inserted
-    cursor.execute("SELECT id FROM attendance WHERE reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM attendance WHERE reg_no = %s", (test_reg,))
     assert cursor.fetchone() is not None
-    cursor.execute("SELECT id FROM leave_requests WHERE user_reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM leave_requests WHERE user_reg_no = %s", (test_reg,))
     assert cursor.fetchone() is not None
-    cursor.execute("SELECT id FROM face_reregister_requests WHERE staff_reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM face_reregister_requests WHERE staff_reg_no = %s", (test_reg,))
     assert cursor.fetchone() is not None
     
     # Run the cleanup logic
     main.delete_user_data_by_reg_no(test_reg)
     
     # Verify they are deleted
-    cursor.execute("SELECT id FROM attendance WHERE reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM attendance WHERE reg_no = %s", (test_reg,))
     assert cursor.fetchone() is None
-    cursor.execute("SELECT id FROM leave_requests WHERE user_reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM leave_requests WHERE user_reg_no = %s", (test_reg,))
     assert cursor.fetchone() is None
-    cursor.execute("SELECT id FROM face_reregister_requests WHERE staff_reg_no = ?", (test_reg,))
+    cursor.execute("SELECT id FROM face_reregister_requests WHERE staff_reg_no = %s", (test_reg,))
     assert cursor.fetchone() is None
     print("Cascading cleanup tests passed successfully!")
 

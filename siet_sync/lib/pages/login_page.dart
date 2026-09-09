@@ -201,15 +201,33 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
 
     try {
       final deviceSessionId = 'dev_${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(999999)}';
-      final response = await http.post(
-        Uri.parse('$API_URL/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': usernameCtrl.text,
-          'password': passwordCtrl.text,
-          'device_id': deviceSessionId,
-        }),
-      );
+      final reqBody = jsonEncode({
+        'username': usernameCtrl.text,
+        'password': passwordCtrl.text,
+        'device_id': deviceSessionId,
+      });
+
+      http.Response response;
+      try {
+        response = await http.post(
+          Uri.parse('$API_URL/api/login'),
+          headers: {'Content-Type': 'application/json'},
+          body: reqBody,
+        );
+        if (response.statusCode == 404 || response.statusCode == 405) {
+          response = await http.post(
+            Uri.parse('$API_URL/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: reqBody,
+          );
+        }
+      } catch (_) {
+        response = await http.post(
+          Uri.parse('$API_URL/login'),
+          headers: {'Content-Type': 'application/json'},
+          body: reqBody,
+        );
+      }
 
       if (response.statusCode == 200) {
         final data = ApiResponseUtils.tryParseJson(response.body);

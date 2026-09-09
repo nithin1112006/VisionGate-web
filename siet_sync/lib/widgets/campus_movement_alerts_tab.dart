@@ -677,8 +677,12 @@ class _CampusMovementAlertsTabState extends State<CampusMovementAlertsTab> {
     final message = alert['message'] ?? '';
     final leftAt = alert['left_at']?.toString() ?? '';
     final resolvedAt = alert['resolved_at']?.toString();
-    final lat = alert['latitude'] is num ? (alert['latitude'] as num).toDouble() : null;
-    final lng = alert['longitude'] is num ? (alert['longitude'] as num).toDouble() : null;
+    final lat = alert['latitude'] is num
+        ? (alert['latitude'] as num).toDouble()
+        : double.tryParse(alert['latitude']?.toString() ?? '');
+    final lng = alert['longitude'] is num
+        ? (alert['longitude'] as num).toDouble()
+        : double.tryParse(alert['longitude']?.toString() ?? '');
     final alertId = alert['id'] as int? ?? 0;
 
     final primaryAlertColor = isActive
@@ -882,7 +886,12 @@ class _CampusMovementAlertsTabState extends State<CampusMovementAlertsTab> {
                 ),
                 if (isResolved && resolvedAt != null)
                   _buildRecipientBadge(
-                    label: 'Returned: ${_formatTimeString(resolvedAt)}',
+                    label: () {
+                      final dur = _formatDuration(leftAt, resolvedAt);
+                      return dur.isNotEmpty
+                          ? 'Returned: ${_formatTimeString(resolvedAt)} ($dur)'
+                          : 'Returned: ${_formatTimeString(resolvedAt)}';
+                    }(),
                     isDark: isDark,
                     color: const Color(0xFF107C41),
                   ),
@@ -999,6 +1008,21 @@ class _CampusMovementAlertsTabState extends State<CampusMovementAlertsTab> {
         return timePart.length >= 5 ? timePart.substring(0, 5) : timePart;
       }
       return dtStr.length > 5 ? dtStr.substring(0, 5) : dtStr;
+    }
+  }
+
+  String _formatDuration(String startStr, String endStr) {
+    try {
+      final s = DateTime.parse(startStr);
+      final e = DateTime.parse(endStr);
+      final diff = e.difference(s);
+      if (diff.isNegative) return '';
+      if (diff.inMinutes < 1) return '<1 min';
+      if (diff.inHours < 1) return '${diff.inMinutes}m';
+      final mins = diff.inMinutes % 60;
+      return '${diff.inHours}h${mins > 0 ? ' ${mins}m' : ''}';
+    } catch (_) {
+      return '';
     }
   }
 }

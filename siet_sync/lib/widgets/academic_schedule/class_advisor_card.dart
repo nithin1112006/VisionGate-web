@@ -410,7 +410,11 @@ class _ClassAdvisorViewState extends State<ClassAdvisorView> {
         _loadData();
         widget.onAdvisorUpdated();
       } else {
-        final err = jsonDecode(res.body)['detail'] ?? 'Failed to assign';
+        String err = 'Failed to assign class advisor';
+        try {
+          final decoded = jsonDecode(res.body);
+          err = decoded['detail'] ?? decoded['error'] ?? decoded['message'] ?? err;
+        } catch (_) {}
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err), backgroundColor: AdminColors.danger));
       }
     } catch (e) {
@@ -444,12 +448,25 @@ class _ClassAdvisorViewState extends State<ClassAdvisorView> {
         Uri.parse('${CollegeIPConfig.defaultURL}/api/v1/academics/class-advisors/$id'),
         headers: {'Authorization': 'Bearer ${widget.token}'},
       );
-      if (res.statusCode == 200) {
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: const Text('Class Advisor unassigned successfully!'), backgroundColor: AdminColors.success),
+        );
         _loadData();
         widget.onAdvisorUpdated();
+      } else {
+        String err = 'Failed to remove advisor';
+        try {
+          final decoded = jsonDecode(res.body);
+          err = decoded['detail'] ?? decoded['error'] ?? decoded['message'] ?? err;
+        } catch (_) {}
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err), backgroundColor: AdminColors.danger));
       }
-    } catch (_) {}
-    if (mounted) setState(() => _isLoading = false);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Network error: $e'), backgroundColor: AdminColors.danger));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override

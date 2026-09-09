@@ -85,7 +85,7 @@ def resolve_academic_date(target_date: date) -> Dict[str, Any]:
     cursor.execute("""
         SELECT day_type, mapped_day_of_week, day_order, title, reason, declared_by
         FROM academic_calendar_date_overrides
-        WHERE override_date = ?
+        WHERE override_date = %s
         LIMIT 1
     """, (target_str,))
     row = cursor.fetchone()
@@ -131,7 +131,7 @@ def resolve_academic_date(target_date: date) -> Dict[str, Any]:
         cursor.execute("""
             SELECT holiday_name, holiday_type, is_optional
             FROM holiday_calendar
-            WHERE holiday_date = ?
+            WHERE holiday_date = %s
             LIMIT 1
         """, (target_str,))
         h_row = cursor.fetchone()
@@ -213,21 +213,21 @@ def get_period_timings_map(
         SELECT start_time, total_periods, period_duration_mins, breaks_json,
                (
                    CASE
-                       WHEN LOWER(batch) = LOWER(?) AND semester = ? AND LOWER(section) = LOWER(?) 
+                       WHEN LOWER(batch) = LOWER(%s) AND semester = %s AND LOWER(section) = LOWER(%s) 
                             AND batch != 'all' AND semester != 0 AND LOWER(section) != 'all' THEN 40
-                       WHEN LOWER(batch) = LOWER(?) AND semester = ? AND (LOWER(section) = 'all' OR section IS NULL)
+                       WHEN LOWER(batch) = LOWER(%s) AND semester = %s AND (LOWER(section) = 'all' OR section IS NULL)
                             AND batch != 'all' AND semester != 0 THEN 30
-                       WHEN LOWER(batch) = LOWER(?) AND (semester = 0 OR semester IS NULL) AND (LOWER(section) = 'all' OR section IS NULL)
+                       WHEN LOWER(batch) = LOWER(%s) AND (semester = 0 OR semester IS NULL) AND (LOWER(section) = 'all' OR section IS NULL)
                             AND batch != 'all' THEN 20
                        WHEN (LOWER(batch) = 'all' OR batch IS NULL) AND (semester = 0 OR semester IS NULL) AND (LOWER(section) = 'all' OR section IS NULL) THEN 10
                        ELSE 1
                    END
                ) as match_score
         FROM academic_period_configs
-        WHERE LOWER(dept) = LOWER(?)
-          AND (LOWER(batch) = LOWER(?) OR LOWER(batch) = 'all' OR batch IS NULL)
-          AND (semester = ? OR semester = 0 OR semester IS NULL)
-          AND (LOWER(section) = LOWER(?) OR LOWER(section) = 'all' OR section IS NULL)
+        WHERE LOWER(dept) = LOWER(%s)
+          AND (LOWER(batch) = LOWER(%s) OR LOWER(batch) = 'all' OR batch IS NULL)
+          AND (semester = %s OR semester = 0 OR semester IS NULL)
+          AND (LOWER(section) = LOWER(%s) OR LOWER(section) = 'all' OR section IS NULL)
         ORDER BY match_score DESC, updated_at DESC NULLS LAST
         LIMIT 1
     """, (
@@ -241,7 +241,7 @@ def get_period_timings_map(
     ))
     row = cursor.fetchone()
     if not row:
-        cursor.execute("SELECT start_time, total_periods, period_duration_mins, breaks_json, 1 FROM academic_period_configs WHERE LOWER(dept) = LOWER(?) LIMIT 1", (dept,))
+        cursor.execute("SELECT start_time, total_periods, period_duration_mins, breaks_json, 1 FROM academic_period_configs WHERE LOWER(dept) = LOWER(%s) LIMIT 1", (dept,))
         row = cursor.fetchone()
 
     start_time = "08:45"
@@ -255,12 +255,20 @@ def get_period_timings_map(
 
     if row:
         if isinstance(row, dict):
-            start_time = row.get("start_time") or start_time
+            raw_st = row.get("start_time")
+            if hasattr(raw_st, "strftime"):
+                start_time = raw_st.strftime("%H:%M")
+            elif raw_st:
+                start_time = str(raw_st)
             total_periods = row.get("total_periods") or total_periods
             period_dur = row.get("period_duration_mins") or period_dur
             breaks_raw = row.get("breaks_json")
         else:
-            start_time = row[0] or start_time
+            raw_st = row[0]
+            if hasattr(raw_st, "strftime"):
+                start_time = raw_st.strftime("%H:%M")
+            elif raw_st:
+                start_time = str(raw_st)
             total_periods = row[1] or total_periods
             period_dur = row[2] or period_dur
             breaks_raw = row[3] if len(row) > 3 else None
@@ -348,6 +356,51 @@ def get_period_timings_map(
     return timeline, timing_map
 
 
+def resolve_staff_identifiers(staff_reg_no: str) -> List[str]:
+    """
+    Given a staff registration number or username, resolves all alternate identifiers
+    (both reg_no and username) from the users and other_staff tables.
+    Returns a list of distinct lowercased identifiers.
+    """
+    clean = (staff_reg_no or "").strip()
+    if not clean:
+        return []
+    aliases = {clean.lower()}
+    try:
+        cursor.execute("""
+            SELECT reg_no, username FROM users
+            WHERE LOWER(reg_no) = LOWER(%s) OR LOWER(username) = LOWER(%s)
+        """, (clean, clean))
+        for row in cursor.fetchall():
+            if isinstance(row, dict):
+                r_no = row.get("reg_no")
+                u_name = row.get("username")
+            else:
+                r_no, u_name = row[0], row[1]
+            if r_no:
+                aliases.add(str(r_no).strip().lower())
+            if u_name:
+                aliases.add(str(u_name).strip().lower())
+
+        cursor.execute("""
+            SELECT reg_no, username FROM other_staff
+            WHERE LOWER(reg_no) = LOWER(%s) OR LOWER(username) = LOWER(%s)
+        """, (clean, clean))
+        for row in cursor.fetchall():
+            if isinstance(row, dict):
+                r_no = row.get("reg_no")
+                u_name = row.get("username")
+            else:
+                r_no, u_name = row[0], row[1]
+            if r_no:
+                aliases.add(str(r_no).strip().lower())
+            if u_name:
+                aliases.add(str(u_name).strip().lower())
+    except Exception:
+        pass
+    return list(aliases)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STAFF SESSION RESOLVER FOR A SINGLE DATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,6 +416,7 @@ def get_staff_sessions_for_date(
     Enriches each session with substitutions, venue relocations, live countdowns, and notes.
     """
     staff_reg_clean = staff_reg_no.strip()
+    staff_aliases = resolve_staff_identifiers(staff_reg_clean)
     date_info = resolve_academic_date(target_date)
 
     if date_info["is_holiday"]:
@@ -391,9 +445,9 @@ def get_staff_sessions_for_date(
         LEFT JOIN department_subjects ds ON (
             LOWER(ds.dept) = LOWER(ct.dept) AND LOWER(ds.subject_code) = LOWER(ct.subject_code)
         )
-        WHERE LOWER(ct.day_of_week) = LOWER(?)
+        WHERE LOWER(ct.day_of_week) = LOWER(%s)
           AND (
-            LOWER(ct.staff_reg_no) = LOWER(?)
+            LOWER(ct.staff_reg_no) = ANY(%s)
             OR EXISTS (
                 SELECT 1 FROM staff_leave_timetable_assignments slta
                 WHERE LOWER(slta.dept) = LOWER(ct.dept)
@@ -401,13 +455,13 @@ def get_staff_sessions_for_date(
                   AND slta.semester = ct.semester
                   AND LOWER(slta.section) = LOWER(ct.section)
                   AND slta.period_number = ct.period_number
-                  AND slta.coverage_date = ?
-                  AND LOWER(slta.alternate_staff_reg) = LOWER(?)
+                  AND slta.coverage_date = %s
+                  AND LOWER(slta.alternate_staff_reg) = ANY(%s)
                   AND slta.status = 'ACTIVE'
             )
           )
         ORDER BY ct.period_number ASC
-    """, (mapped_day, staff_reg_clean, target_date_str, staff_reg_clean))
+    """, (mapped_day, staff_aliases, target_date_str, staff_aliases))
 
     db_slots = cursor.fetchall()
     sessions: List[Dict[str, Any]] = []
@@ -460,9 +514,9 @@ def get_staff_sessions_for_date(
             FROM staff_leave_timetable_assignments sa
             LEFT JOIN users u ON LOWER(u.reg_no) = LOWER(sa.alternate_staff_reg)
             LEFT JOIN other_staff os ON LOWER(os.reg_no) = LOWER(sa.alternate_staff_reg)
-            WHERE LOWER(sa.dept) = LOWER(?) AND sa.batch = ? AND sa.semester = ?
-              AND LOWER(sa.section) = LOWER(?) AND sa.period_number = ?
-              AND sa.coverage_date = ? AND sa.status = 'ACTIVE'
+            WHERE LOWER(sa.dept) = LOWER(%s) AND sa.batch = %s AND sa.semester = %s
+              AND LOWER(sa.section) = LOWER(%s) AND sa.period_number = %s
+              AND sa.coverage_date = %s AND sa.status = 'ACTIVE'
             LIMIT 1
         """, (s_dept, s_batch, s_sem, s_sec, p_num, target_date_str))
         sub_row = cursor.fetchone()
@@ -479,14 +533,17 @@ def get_staff_sessions_for_date(
             cov_name = sub_row["covering_name"] if isinstance(sub_row, dict) else sub_row[1]
             cov_dept = sub_row["covering_dept"] if isinstance(sub_row, dict) else sub_row[2]
 
-            if cov_reg.lower() == staff_reg_clean.lower() and orig_staff_reg.lower() != staff_reg_clean.lower():
+            cov_reg_l = cov_reg.lower()
+            orig_reg_l = orig_staff_reg.lower()
+
+            if cov_reg_l in staff_aliases and orig_reg_l not in staff_aliases:
                 # Current staff is covering for another teacher on leave
                 is_covering_for_other = True
                 effective_staff_reg = staff_reg_clean
                 effective_staff_name = cov_name
                 effective_staff_dept = cov_dept
                 substitution_note = f"Covering for {orig_staff_name} (on Leave)"
-            elif orig_staff_reg.lower() == staff_reg_clean.lower() and cov_reg.lower() != staff_reg_clean.lower():
+            elif orig_reg_l in staff_aliases and cov_reg_l not in staff_aliases:
                 # Current staff is on leave; class is covered by alternate
                 is_substituted = True
                 effective_staff_reg = cov_reg
@@ -498,8 +555,8 @@ def get_staff_sessions_for_date(
         cursor.execute("""
             SELECT new_venue_code, reason
             FROM class_venue_overrides
-            WHERE LOWER(dept) = LOWER(?) AND batch = ? AND semester = ? AND LOWER(section) = LOWER(?)
-              AND LOWER(day_of_week) = LOWER(?) AND period_number = ? AND override_date = ?
+            WHERE LOWER(dept) = LOWER(%s) AND batch = %s AND semester = %s AND LOWER(section) = LOWER(%s)
+              AND LOWER(day_of_week) = LOWER(%s) AND period_number = %s AND override_date = %s
             LIMIT 1
         """, (s_dept, s_batch, s_sem, s_sec, mapped_day, p_num, target_date_str))
         cvo_row = cursor.fetchone()
@@ -548,9 +605,9 @@ def get_staff_sessions_for_date(
         cursor.execute("""
             SELECT id, topic_covered, learning_objectives, assignment_notes, updated_at
             FROM staff_session_notes
-            WHERE LOWER(staff_reg_no) = LOWER(?) AND timetable_slot_id = ? AND session_date = ?
+            WHERE LOWER(staff_reg_no) = ANY(%s) AND timetable_slot_id = %s AND session_date = %s
             LIMIT 1
-        """, (staff_reg_clean, slot_id, target_date_str))
+        """, (staff_aliases, slot_id, target_date_str))
         n_row = cursor.fetchone()
 
         note_obj = None
@@ -625,6 +682,7 @@ def get_staff_sessions_for_date(
 def get_staff_assigned_subjects(staff_reg_no: str) -> List[Dict[str, Any]]:
     """Retrieve distinct list of subjects assigned to the staff member."""
     staff_reg_clean = staff_reg_no.strip()
+    staff_aliases = resolve_staff_identifiers(staff_reg_clean)
     cursor.execute("""
         SELECT DISTINCT sfa.dept, sfa.batch, sfa.semester, sfa.section,
                         sfa.subject_code, sfa.subject_name, sfa.subject_type,
@@ -634,7 +692,7 @@ def get_staff_assigned_subjects(staff_reg_no: str) -> List[Dict[str, Any]]:
         LEFT JOIN department_subjects ds ON (
             LOWER(ds.dept) = LOWER(sfa.dept) AND LOWER(ds.subject_code) = LOWER(sfa.subject_code)
         )
-        WHERE LOWER(sfa.staff_reg_no) = LOWER(?)
+        WHERE LOWER(sfa.staff_reg_no) = ANY(%s)
         UNION
         SELECT DISTINCT ct.dept, ct.batch, ct.semester, ct.section,
                         ct.subject_code, ct.subject_name,
@@ -642,9 +700,9 @@ def get_staff_assigned_subjects(staff_reg_no: str) -> List[Dict[str, Any]]:
                         4 as weekly_hours,
                         ct.is_lab_block as is_lab
         FROM class_timetable ct
-        WHERE LOWER(ct.staff_reg_no) = LOWER(?)
+        WHERE LOWER(ct.staff_reg_no) = ANY(%s)
         ORDER BY subject_code, section
-    """, (staff_reg_clean, staff_reg_clean))
+    """, (staff_aliases, staff_aliases))
 
     rows = cursor.fetchall()
     subjects = []
@@ -697,7 +755,7 @@ def get_staff_calendar_month(
     staff_reg_clean = staff_reg_no.strip()
 
     # Get Staff Name
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(?) LIMIT 1", (staff_reg_clean, staff_reg_clean))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(%s) LIMIT 1", (staff_reg_clean, staff_reg_clean))
     user_row = cursor.fetchone()
     staff_name = (user_row["name"] if isinstance(user_row, dict) else user_row[0]) if user_row else "Faculty"
 
@@ -832,7 +890,7 @@ def get_staff_daily_digest(staff_reg_no: str, target_date: Optional[date] = None
     target_dt = target_date or date.today()
 
     # Get Staff Name
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(?) LIMIT 1", (staff_reg_clean, staff_reg_clean))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(%s) LIMIT 1", (staff_reg_clean, staff_reg_clean))
     user_row = cursor.fetchone()
     staff_name = (user_row["name"] if isinstance(user_row, dict) else user_row[0]) if user_row else "Faculty"
 
@@ -895,7 +953,7 @@ def generate_staff_ical_feed(
     max_days = min(max(days_ahead, 7), 180)
 
     # Get Staff Name
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(?) LIMIT 1", (staff_reg_clean, staff_reg_clean))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s) UNION SELECT name FROM other_staff WHERE LOWER(reg_no) = LOWER(%s) LIMIT 1", (staff_reg_clean, staff_reg_clean))
     user_row = cursor.fetchone()
     staff_name = (user_row["name"] if isinstance(user_row, dict) else user_row[0]) if user_row else staff_reg_clean
 
@@ -997,7 +1055,7 @@ def save_session_note(
             staff_reg_no, timetable_slot_id, session_date, subject_code,
             topic_covered, learning_objectives, assignment_notes, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
         ON CONFLICT (staff_reg_no, timetable_slot_id, session_date) DO UPDATE SET
             subject_code = EXCLUDED.subject_code,
             topic_covered = EXCLUDED.topic_covered,
@@ -1046,10 +1104,10 @@ def save_session_note(
 
 def get_session_notes_for_slot(timetable_slot_id: int, staff_reg_no: Optional[str] = None) -> List[Dict[str, Any]]:
     """Retrieve historical session notes for a timetable slot."""
-    where = ["timetable_slot_id = ?"]
+    where = ["timetable_slot_id = %s"]
     params = [timetable_slot_id]
     if staff_reg_no:
-        where.append("LOWER(staff_reg_no) = LOWER(?)")
+        where.append("LOWER(staff_reg_no) = LOWER(%s)")
         params.append(staff_reg_no.strip())
 
     cursor.execute(f"""
@@ -1103,7 +1161,7 @@ def get_reminder_preferences(staff_reg_no: str) -> Dict[str, Any]:
         SELECT lead_time_minutes, daily_digest_enabled, daily_digest_time,
                notify_on_substitution, notify_on_relocation, updated_at
         FROM staff_session_reminder_preferences
-        WHERE LOWER(staff_reg_no) = LOWER(?)
+        WHERE LOWER(staff_reg_no) = LOWER(%s)
         LIMIT 1
     """, (staff_reg_clean,))
     row = cursor.fetchone()
@@ -1160,7 +1218,7 @@ def update_reminder_preferences(
             staff_reg_no, lead_time_minutes, daily_digest_enabled, daily_digest_time,
             notify_on_substitution, notify_on_relocation, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
         ON CONFLICT (staff_reg_no) DO UPDATE SET
             lead_time_minutes = EXCLUDED.lead_time_minutes,
             daily_digest_enabled = EXCLUDED.daily_digest_enabled,
@@ -1199,7 +1257,7 @@ def dispatch_upcoming_session_reminders() -> int:
     cursor.execute("""
         SELECT DISTINCT ct.staff_reg_no
         FROM class_timetable ct
-        WHERE LOWER(ct.day_of_week) = LOWER(?)
+        WHERE LOWER(ct.day_of_week) = LOWER(%s)
     """, (today_dt.strftime("%A"),))
     rows = cursor.fetchall()
     staff_regs = [r[0] if not isinstance(r, dict) else r["staff_reg_no"] for r in rows if r]
@@ -1227,9 +1285,9 @@ def dispatch_upcoming_session_reminders() -> int:
                     # Prevent duplicate for today
                     cursor.execute("""
                         SELECT id FROM notifications_all_roles
-                        WHERE LOWER(recipient_reg_no) = LOWER(?)
-                          AND title = ?
-                          AND created_at >= ?
+                        WHERE LOWER(recipient_reg_no) = LOWER(%s)
+                          AND title = %s
+                          AND created_at >= %s
                         LIMIT 1
                     """, (reg, notif_title, f"{today_str} 00:00:00"))
                     existing = cursor.fetchone()
@@ -1239,7 +1297,7 @@ def dispatch_upcoming_session_reminders() -> int:
                             INSERT INTO notifications_all_roles (
                                 recipient_reg_no, title, message, type, is_read, created_by, created_at
                             )
-                            VALUES (?, ?, ?, 'SESSION_REMINDER', FALSE, 'SYSTEM', CURRENT_TIMESTAMP)
+                            VALUES (%s, %s, %s, 'SESSION_REMINDER', FALSE, 'SYSTEM', CURRENT_TIMESTAMP)
                         """, (reg, notif_title, notif_msg))
                         dispatched_count += 1
         except Exception as err:

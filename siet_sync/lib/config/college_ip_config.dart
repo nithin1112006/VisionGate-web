@@ -30,7 +30,7 @@ class CollegeIPConfig {
   /// - Your router needs port forwarding to this computer OR
   /// - Use a tunnel service like Cloudflare: cloudflared tunnel --url http://localhost:8001
   ///
-  static const String customServerURL = "https://attenda.srishakthicgpa.in";
+  static const String customServerURL = "https://app.srishakthicgpa.in";
 
   /// Runtime API URL - can be set programmatically for web/deployment
   /// Set this to override customServerURL at runtime
@@ -238,11 +238,18 @@ class CollegeIPConfig {
   ///
   static const List<Map<String, dynamic>> collegeIPs = [
     {
+      'ip': '127.0.0.1',
+      'port': 8001,
+      'location': 'Local Machine',
+      'name': 'Localhost Server',
+      'isDefault': true,
+    },
+    {
       'ip': '192.168.137.1',
       'port': 8001,
       'location': 'USB Tethering',
       'name': 'Mobile Hotspot',
-      'isDefault': true,
+      'isDefault': false,
     },
     {
       'ip': '192.168.1.100',

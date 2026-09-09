@@ -157,17 +157,24 @@ demo_users = [
 
 inserted_users = 0
 for username, password, reg_no, name, dept, role, created_by in demo_users:
-    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-    if cursor.fetchone():
-        print(f"  SKIP: {username} (already exists)")
-        continue
+    cursor.execute("SELECT id FROM users WHERE username = %s OR LOWER(reg_no) = LOWER(%s)", (username, reg_no))
+    row = cursor.fetchone()
     pw_hash = hash_password(password)
-    cursor.execute(
-        "INSERT INTO users (username, password_hash, reg_no, name, dept, role, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-        (username, pw_hash, reg_no, name, dept, role, created_by),
-    )
-    inserted_users += 1
-    print(f"  INSERTED: {username} ({role}) - {name}")
+    if not row:
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, reg_no, name, dept, role, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (username, pw_hash, reg_no, name, dept, role, created_by),
+        )
+        inserted_users += 1
+        print(f"  INSERTED: {username} ({role}) - {name}")
+    elif username == "admin":
+        cursor.execute(
+            "UPDATE users SET password_hash = %s WHERE username = %s OR LOWER(reg_no) = LOWER(%s)",
+            (pw_hash, username, reg_no),
+        )
+        print(f"  UPDATED: {username} ({role}) password hash")
+    else:
+        print(f"  SKIP: {username} (already exists)")
 
 print(f"\nUsers: {inserted_users} inserted")
 

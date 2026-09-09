@@ -38,36 +38,44 @@ class TimetableGridView extends StatelessWidget {
   });
 
   Map<String, dynamic>? _getSlot(String day, int periodNum) {
-    return slots.cast<Map<String, dynamic>?>().firstWhere(
-      (s) => s?['day_of_week']?.toString().toLowerCase() == day.toLowerCase() && (s?['period_number'] as num?)?.toInt() == periodNum,
-      orElse: () => null,
-    );
+    for (final s in slots) {
+      final sDay = s['day_of_week']?.toString().toLowerCase();
+      final sNum = (s['period_number'] as num?)?.toInt();
+      if (sDay == day.toLowerCase() && sNum == periodNum) {
+        return s;
+      }
+    }
+    return null;
   }
 
   int _getScheduledHoursForSubject(String subjectCode) {
-    return slots.where((s) => s['subject_code'] == subjectCode).length;
+    return slots.where((s) => s['subject_code']?.toString().toLowerCase() == subjectCode.toLowerCase()).length;
   }
 
   void _openSlotEditor(BuildContext context, String day, PeriodSlotTiming timing) {
-    final slot = _getSlot(day, timing.periodNumber);
-    showDialog(
-      context: context,
-      builder: (ctx) => TimetableSlotDialog(
-        token: token,
-        dept: dept,
-        batch: batch,
-        semester: semester,
-        section: section,
-        dayOfWeek: day,
-        periodNumber: timing.periodNumber,
-        periodTimeRange: '${timing.startTime} - ${timing.endTime}',
-        initialSlot: slot,
-        facultyPool: facultyPool,
-        subjectAllocations: subjectAllocations,
-        availableDepartments: availableDepartments,
-        onSaved: onSlotUpdated,
-      ),
-    );
+    try {
+      final slot = _getSlot(day, timing.periodNumber);
+      showDialog(
+        context: context,
+        builder: (ctx) => TimetableSlotDialog(
+          token: token,
+          dept: dept,
+          batch: batch,
+          semester: semester,
+          section: section,
+          dayOfWeek: day,
+          periodNumber: timing.periodNumber,
+          periodTimeRange: '${timing.startTime} - ${timing.endTime}',
+          initialSlot: slot,
+          facultyPool: facultyPool,
+          subjectAllocations: subjectAllocations,
+          availableDepartments: availableDepartments,
+          onSaved: onSlotUpdated,
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[TimetableGridView] Error opening slot editor: $e\n$st');
+    }
   }
 
   Future<void> _handleDayCopy(BuildContext context, String srcDay) async {

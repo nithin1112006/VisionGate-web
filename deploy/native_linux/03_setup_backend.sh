@@ -48,7 +48,8 @@ echo -e "\n${CYAN}[3/5] Upgrading pip, setuptools, and wheel...${NC}"
 # 4. Install PyTorch with CUDA for RTX 5070 acceleration
 echo -e "\n${CYAN}[4/5] Installing PyTorch with CUDA support (for NVIDIA GeForce RTX 5070)...${NC}"
 if command -v nvidia-smi &>/dev/null; then
-    echo "Installing PyTorch CUDA 12.4 build..."
+    echo "Installing PyTorch CUDA 12.8 build for RTX 5070 (sm_120)..."
+    "${VENV_PIP}" install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128 || \
     "${VENV_PIP}" install torch torchvision --index-url https://download.pytorch.org/whl/cu124 || {
         echo -e "${YELLOW}Falling back to standard PyTorch PyPI release...${NC}"
         "${VENV_PIP}" install torch torchvision

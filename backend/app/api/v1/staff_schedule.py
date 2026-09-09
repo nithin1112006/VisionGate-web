@@ -60,8 +60,13 @@ def _resolve_target_staff(request: Request, staff_reg_no: Optional[str]) -> str:
 
     if staff_reg_no and staff_reg_no.strip():
         req_reg = staff_reg_no.strip()
+        caller_aliases = svc.resolve_staff_identifiers(caller_reg)
+        caller_user = (user.get("username") or "").strip().lower()
+        if caller_user and caller_user not in caller_aliases:
+            caller_aliases.append(caller_user)
+
         # Non-admin / non-hod users can only view their own schedule
-        if user_role not in ("admin", "superadmin", "hod", "head of department", "principal") and req_reg.lower() != caller_reg.lower():
+        if user_role not in ("admin", "superadmin", "hod", "head of department", "principal") and req_reg.lower() not in caller_aliases:
             raise HTTPException(status_code=403, detail="Unauthorized to view another staff's schedule.")
         return req_reg
 

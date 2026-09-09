@@ -34,18 +34,54 @@ STATIC_CONFIG=""
 if [ -d "${WEB_BUILD_DIR}" ]; then
     echo -e "${GREEN}[✓] Detected compiled Flutter Web build at: ${WEB_BUILD_DIR}${NC}"
     STATIC_CONFIG="
-        # Serve Flutter Web SPA frontend
-        location / {
+        # 1. Static Flutter Web assets
+        location ~* \.(js|json|wasm|png|jpg|jpeg|gif|ico|css|svg|woff|woff2|ttf|map)$ {
             root ${WEB_BUILD_DIR};
-            try_files \$uri \$uri/ /index.html;
+            try_files \$uri =404;
+            add_header Cache-Control \"public, max-age=3600\";
+            add_header Access-Control-Allow-Origin \"*\";
+        }
+
+        location ^~ /assets/ {
+            root ${WEB_BUILD_DIR};
+            try_files \$uri =404;
+            add_header Access-Control-Allow-Origin \"*\";
+        }
+
+        location ^~ /canvaskit/ {
+            root ${WEB_BUILD_DIR};
+            try_files \$uri =404;
+            add_header Access-Control-Allow-Origin \"*\";
+        }
+
+        # 2. Web root serving index.html ONLY for root path
+        location = / {
+            root ${WEB_BUILD_DIR};
+            try_files /index.html =404;
             add_header Cache-Control \"no-cache\";
         }
 
-        # Route API requests to FastAPI backend
-        location /api/ {
+        location = /index.html {
+            root ${WEB_BUILD_DIR};
+            add_header Cache-Control \"no-cache\";
+        }
+
+        # 3. All other requests (whether /login, /token, /check_vpn, /admin/*, /api/*, etc.) -> Backend
+        location / {
+            # Handle CORS preflight
+            if (\$request_method = 'OPTIONS') {
+                add_header Access-Control-Allow-Origin '*' always;
+                add_header Access-Control-Allow-Methods 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
+                add_header Access-Control-Allow-Headers '*' always;
+                add_header Content-Length 0;
+                add_header Content-Type 'text/plain charset=UTF-8';
+                return 204;
+            }
+
             proxy_pass http://attenda_backend;
             proxy_http_version 1.1;
-            proxy_set_header Connection \"\";
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection \$connection_upgrade;
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -54,21 +90,9 @@ if [ -d "${WEB_BUILD_DIR}" ]; then
             proxy_connect_timeout 60s;
             proxy_send_timeout 120s;
             proxy_read_timeout 120s;
-        }
-
-        location /docs {
-            proxy_pass http://attenda_backend;
-            proxy_set_header Host \$host;
-        }
-
-        location /openapi.json {
-            proxy_pass http://attenda_backend;
-            proxy_set_header Host \$host;
-        }
-
-        location /health {
-            proxy_pass http://attenda_backend;
-            proxy_set_header Host \$host;
+            proxy_buffering on;
+            proxy_buffers 8 16k;
+            proxy_buffer_size 32k;
         }
 "
 else
@@ -113,7 +137,7 @@ map $http_upgrade $connection_upgrade {
 server {
     listen 80;
     listen [::]:80;
-    server_name attenda.srishakthicgpa.in _;
+    server_name app.srishakthicgpa.in attenda.srishakthicgpa.in _;
 
     # Cloudflare Real IP Restoration
     set_real_ip_from 173.245.48.0/20;

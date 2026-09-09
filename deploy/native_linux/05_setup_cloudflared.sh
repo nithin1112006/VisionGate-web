@@ -45,42 +45,36 @@ if ! command -v cloudflared &>/dev/null; then
     rm -f /tmp/cloudflared.deb
 fi
 
-# 3. Setup via Token (Preferred & Cleanest Method)
-if [ -n "${TUNNEL_TOKEN}" ]; then
-    echo -e "\n${CYAN}[1/2] Installing cloudflared system service with Tunnel Token...${NC}"
-    
-    # Uninstall existing service if any
-    systemctl stop cloudflared 2>/dev/null || true
-    cloudflared service uninstall 2>/dev/null || true
+# 3. Setup via Local Tunnel Credentials (Tunnel 6da8644b-e011-441d-b1bd-68b546146b16)
+echo -e "\n${CYAN}[1/2] Configuring cloudflared system service with local Tunnel Credentials...${NC}"
+mkdir -p /etc/cloudflared
 
-    # Install as official systemd service
-    cloudflared service install "${TUNNEL_TOKEN}"
-    systemctl daemon-reload
-    systemctl enable --now cloudflared
-    echo -e "${GREEN}[✓] cloudflared system service installed and started!${NC}"
-else
-    echo -e "\n${CYAN}[1/2] Token not found in .env; configuring via credentials.json...${NC}"
-    mkdir -p /etc/cloudflared
-    
-    CRED_FILE="${ROOT_DIR}/docker/cloudflared/credentials.json"
-    if [ -f "${CRED_FILE}" ]; then
-        cp "${CRED_FILE}" /etc/cloudflared/credentials.json
-        chmod 600 /etc/cloudflared/credentials.json
-    fi
+CRED_FILE="${ROOT_DIR}/docker/cloudflared/credentials.json"
+if [ -f "${CRED_FILE}" ]; then
+    cp "${CRED_FILE}" /etc/cloudflared/credentials.json
+    chmod 600 /etc/cloudflared/credentials.json
+fi
 
-    # Native Ingress pointing to 127.0.0.1:80 instead of Docker hostname
-    cat << 'EOF' > /etc/cloudflared/config.yml
-tunnel: 27b90fd6-f11b-4f35-b160-47bcc2e2ed9e
+# Stop existing service if running
+systemctl stop cloudflared 2>/dev/null || true
+
+# Native Ingress pointing to 127.0.0.1:80 (Nginx Reverse Proxy)
+cat << 'EOF' > /etc/cloudflared/config.yml
+tunnel: 6da8644b-e011-441d-b1bd-68b546146b16
 credentials-file: /etc/cloudflared/credentials.json
 
 ingress:
   - hostname: attenda.srishakthicgpa.in
     service: http://127.0.0.1:80
+  - hostname: app.srishakthicgpa.in
+    service: http://127.0.0.1:80
   - service: http_status:404
 EOF
 
-    # Install systemd service
-    cat << 'EOF' > /etc/systemd/system/cloudflared.service
+CLOUDFLARED_BIN="$(command -v cloudflared || echo "/usr/bin/cloudflared")"
+
+# Install systemd service using local config.yml
+cat << EOF > /etc/systemd/system/cloudflared.service
 [Unit]
 Description=Cloudflare Tunnel Agent (Native)
 After=network-online.target
@@ -88,7 +82,7 @@ Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/cloudflared --config /etc/cloudflared/config.yml tunnel run
+ExecStart=${CLOUDFLARED_BIN} --config /etc/cloudflared/config.yml tunnel run
 Restart=always
 RestartSec=5s
 KillMode=mixed
@@ -97,10 +91,9 @@ KillMode=mixed
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable --now cloudflared
-    echo -e "${GREEN}[✓] cloudflared systemd service configured and started!${NC}"
-fi
+systemctl daemon-reload
+systemctl enable --now cloudflared
+echo -e "${GREEN}[✓] cloudflared systemd service configured and started!${NC}"
 
 # 4. Verify Service Status
 echo -e "\n${CYAN}[2/2] Checking cloudflared service status...${NC}"

@@ -197,9 +197,11 @@ class AttendanceService:
             return attendance_value
         else:
             # Fallback to overall status
-            if st_lower in ('present',):
+            if st_lower in ('present', 'od', 'on duty', 'on duty (od)'):
                 return Decimal("1.0")
-            elif st_lower in ('half_day', 'half day', 'half day present (fn)', 'half day present (an)'):
+            elif 'half day' in st_lower or st_lower in ('half_day', 'half day'):
+                if 'leave' in st_lower:
+                    return Decimal("0.0")
                 return Decimal("0.5")
             elif st_lower in ('holiday',):
                 return Decimal("1.0")  # Holidays count as full credit
@@ -277,18 +279,45 @@ class AttendanceService:
                 elif (fh in ("Present", "OD") and sh in ("Present", "OD")):
                     overall_status = "Present"
                     attendance_value = Decimal("1.0")
-                elif fh == "Present" and sh != "Present":
-                    overall_status = "Half Day Present (FN)"
-                    attendance_value = Decimal("0.5")
-                elif fh != "Present" and sh == "Present":
-                    overall_status = "Half Day Present (AN)"
-                    attendance_value = Decimal("0.5")
-                elif fh == "Leave" and sh == "Leave":
-                    overall_status = "On Leave"
-                    attendance_value = Decimal("0.0")
                 elif fh == "OD" and sh == "OD":
                     overall_status = "On Duty (OD)"
                     attendance_value = Decimal("1.0")
+                elif fh == "Present" and sh in ("Absent", "Pending"):
+                    overall_status = "Half Day Present (FN)"
+                    attendance_value = Decimal("0.5")
+                elif fh in ("Absent", "Pending") and sh == "Present":
+                    overall_status = "Half Day Present (AN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "OD" and sh in ("Absent", "Pending"):
+                    overall_status = "Half Day OD (FN)"
+                    attendance_value = Decimal("0.5")
+                elif fh in ("Absent", "Pending") and sh == "OD":
+                    overall_status = "Half Day OD (AN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "Present" and sh == "Leave":
+                    overall_status = "Half Day Present (FN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "Leave" and sh == "Present":
+                    overall_status = "Half Day Present (AN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "OD" and sh == "Leave":
+                    overall_status = "Half Day OD (FN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "Leave" and sh == "OD":
+                    overall_status = "Half Day OD (AN)"
+                    attendance_value = Decimal("0.5")
+                elif fh == "Leave" and sh in ("Absent", "Pending"):
+                    overall_status = "Half Day Leave (FN)"
+                    attendance_value = Decimal("0.0")
+                elif fh in ("Absent", "Pending") and sh == "Leave":
+                    overall_status = "Half Day Leave (AN)"
+                    attendance_value = Decimal("0.0")
+                elif fh == "Leave" and sh == "Leave":
+                    overall_status = "On Leave"
+                    attendance_value = Decimal("0.0")
+                elif fh == "Pending" and sh == "Pending":
+                    overall_status = "Pending"
+                    attendance_value = Decimal("0.0")
                 else:
                     overall_status = "Absent"
                     attendance_value = Decimal("0.0")
@@ -431,7 +460,14 @@ class AttendanceService:
             half_days = 0
             absent_days = 0
             leave_days = 0
-            total_working_days = (end_date - start_date).days + 1
+            # Calculate working days excluding Sundays
+            cur_d = start_date
+            working_days_count = 0
+            while cur_d <= end_date:
+                if cur_d.weekday() < 6:
+                    working_days_count += 1
+                cur_d += timedelta(days=1)
+            total_working_days = max(working_days_count, 1)
             
             for row in rows:
                 value = row["attendance_value"] or Decimal("0.0")
@@ -442,7 +478,8 @@ class AttendanceService:
                 elif value == Decimal("0.5"):
                     half_days += 1
                 elif value == Decimal("0.0"):
-                    if row["status"].lower() == "leave":
+                    st_l = str(row["status"] or "").lower()
+                    if "leave" in st_l:
                         leave_days += 1
                     else:
                         absent_days += 1
