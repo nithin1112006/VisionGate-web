@@ -56,7 +56,13 @@ bash 05_setup_cloudflared.sh
 
 # Step 7: System Diagnostics
 echo -e "\n${CYAN}>>> STEP 7: Running System Diagnostic Verification...${NC}"
-sleep 3
+echo "Waiting for backend service to finish warming up face models..."
+for i in {1..15}; do
+    if curl -sf -m 2 http://127.0.0.1:8001/health &>/dev/null; then
+        break
+    fi
+    sleep 2
+done
 bash doctor_linux.sh
 
 echo -e "\n${GREEN}==============================================================================${NC}"

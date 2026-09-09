@@ -905,7 +905,8 @@ CREATE TABLE IF NOT EXISTS class_advisors (
     effective_from DATE,
     effective_to   DATE,
     assigned_role  VARCHAR(50) DEFAULT 'admin',
-    UNIQUE (dept, year, section)
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (dept, batch, semester, section, advisor_type)
 );
 ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS batch         VARCHAR(50);
 ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS semester      INTEGER;
@@ -918,6 +919,14 @@ ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS advisor_name  VARCHAR(160);
 ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS effective_from DATE;
 ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS effective_to  DATE;
 ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS assigned_role VARCHAR(50) DEFAULT 'admin';
+ALTER TABLE class_advisors ADD COLUMN IF NOT EXISTS updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE class_advisors DROP CONSTRAINT IF EXISTS class_advisors_dept_year_section_key;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'class_advisors_dept_batch_sem_sec_type_key') THEN
+        ALTER TABLE class_advisors ADD CONSTRAINT class_advisors_dept_batch_sem_sec_type_key UNIQUE (dept, batch, semester, section, advisor_type);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_class_adv_staff    ON class_advisors (staff_reg_no);
 CREATE INDEX IF NOT EXISTS idx_class_adv_dept_sem ON class_advisors (dept, batch, semester, section);
@@ -1275,14 +1284,14 @@ CREATE INDEX IF NOT EXISTS idx_slta_coverage ON staff_leave_timetable_assignment
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS student_leave_od_requests (
     id                     SERIAL PRIMARY KEY,
-    reg_no                 VARCHAR(64) NOT NULL,
+    reg_no                 VARCHAR(64),
     name                   VARCHAR(160),
     dept                   VARCHAR(160),
     year                   INTEGER,
     section                VARCHAR(16),
     request_type           VARCHAR(32) NOT NULL,
-    from_date              DATE NOT NULL,
-    to_date                DATE NOT NULL,
+    from_date              DATE,
+    to_date                DATE,
     reason                 TEXT,
     document_url           TEXT,
     status                 VARCHAR(32) DEFAULT 'pending',
@@ -1328,6 +1337,8 @@ ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS admin_remarks    
 ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS admin_action_at        TIMESTAMP;
 ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS is_attendance_credited BOOLEAN DEFAULT FALSE;
 ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS document_proof_url     TEXT;
+ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE student_leave_od_requests ADD COLUMN IF NOT EXISTS approved_by             VARCHAR(255);
 CREATE INDEX IF NOT EXISTS idx_stu_leave_reg ON student_leave_od_requests (student_reg_no, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS student_leave_od_action_history (

@@ -111,9 +111,7 @@ cd "${ROOT_DIR}/backend"
 if [ -f "run_migrations.py" ]; then
     "${PYTHON_BIN}" run_migrations.py || true
 fi
-if [ -f "seed_db_data.py" ]; then
-    "${PYTHON_BIN}" seed_db_data.py || true
-fi
+# Auto-seeding disabled permanently
 
 echo -e "\n${GREEN}[SUCCESS] Database setup completely finished with 100% accuracy!${NC}"
 echo -e "Next step: bash 03_setup_backend.sh"

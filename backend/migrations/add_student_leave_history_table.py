@@ -90,7 +90,7 @@ def run():
         att_credited = r[21] if isinstance(r, (list, tuple)) else r.get("is_attendance_credited")
         created_at = r[22] if isinstance(r, (list, tuple)) else r.get("created_at")
 
-        cursor.execute("SELECT COUNT(*) FROM student_leave_od_action_history WHERE request_id = ?", (rid,))
+        cursor.execute("SELECT COUNT(*) FROM student_leave_od_action_history WHERE request_id = %s", (rid,))
         cnt = cursor.fetchone()[0]
         if cnt > 0:
             continue
@@ -108,7 +108,7 @@ def run():
             INSERT INTO student_leave_od_action_history
               (request_id, student_reg_no, action, actor_role, actor_reg_no, actor_name,
                previous_status, new_status, remarks, metadata_json, created_at)
-            VALUES (?, ?, 'SUBMITTED', 'STUDENT', ?, ?, NULL, 'PENDING_ADVISOR', ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (%s, %s, 'SUBMITTED', 'STUDENT', %s, %s, NULL, 'PENDING_ADVISOR', %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
         """, (rid, stu_reg, stu_reg, stu_reg, reason or "Application submitted", meta, created_at))
 
         if m_status and m_status != "PENDING":
@@ -116,7 +116,7 @@ def run():
                 INSERT INTO student_leave_od_action_history
                   (request_id, student_reg_no, action, actor_role, actor_reg_no, actor_name,
                    previous_status, new_status, remarks, metadata_json, created_at)
-                VALUES (?, ?, ?, 'CLASS_ADVISOR', ?, ?, 'PENDING_ADVISOR', ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (%s, %s, %s, 'CLASS_ADVISOR', %s, %s, 'PENDING_ADVISOR', %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             """, (rid, stu_reg, "RECOMMENDED" if m_status == "RECOMMENDED" else "REJECTED_BY_MENTOR",
                   m_reg or "ADVISOR", m_name or "Class Advisor", m_status, m_remarks or "", meta, m_time))
 
@@ -126,7 +126,7 @@ def run():
                 INSERT INTO student_leave_od_action_history
                   (request_id, student_reg_no, action, actor_role, actor_reg_no, actor_name,
                    previous_status, new_status, remarks, metadata_json, created_at)
-                VALUES (?, ?, ?, 'HOD', ?, ?, 'PENDING_HOD', ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (%s, %s, %s, 'HOD', %s, %s, 'PENDING_HOD', %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             """, (rid, stu_reg, act_name, h_reg or "HOD", h_name or "Head of Department", h_status, h_remarks or "", meta, h_time))
 
         if a_status and a_status != "PENDING":
@@ -135,7 +135,7 @@ def run():
                 INSERT INTO student_leave_od_action_history
                   (request_id, student_reg_no, action, actor_role, actor_reg_no, actor_name,
                    previous_status, new_status, remarks, metadata_json, created_at)
-                VALUES (?, ?, ?, 'ADMIN', 'admin', 'Central Administration', 'PENDING_ADMIN', ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+                VALUES (%s, %s, %s, 'ADMIN', 'admin', 'Central Administration', 'PENDING_ADMIN', %s, %s, %s, COALESCE(%s, CURRENT_TIMESTAMP))
             """, (rid, stu_reg, act_name, a_status, a_remarks or "", meta, a_time))
 
         if att_credited:
@@ -143,8 +143,8 @@ def run():
                 INSERT INTO student_leave_od_action_history
                   (request_id, student_reg_no, action, actor_role, actor_reg_no, actor_name,
                    previous_status, new_status, remarks, metadata_json, created_at)
-                VALUES (?, ?, 'ATTENDANCE_CREDITED', 'SYSTEM', 'SYSTEM', 'Timetable Attendance Engine',
-                        'APPROVED', 'ATTENDANCE_CREDITED', 'Timetable period attendance automatically credited', ?, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, 'ATTENDANCE_CREDITED', 'SYSTEM', 'SYSTEM', 'Timetable Attendance Engine',
+                        'APPROVED', 'ATTENDANCE_CREDITED', 'Timetable period attendance automatically credited', %s, CURRENT_TIMESTAMP)
             """, (rid, stu_reg, meta))
 
         backfilled += 1

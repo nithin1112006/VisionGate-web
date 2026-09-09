@@ -1655,6 +1655,7 @@ class _StaffScheduleWorkingListTabState extends State<StaffScheduleWorkingListTa
                 onPressed: () {
                   setState(() => _selectedDate = _selectedDate.subtract(const Duration(days: 1)));
                   _fetchTodayPeriods();
+                  _fetchDailyDigest(_selectedDate);
                 },
               ),
               Expanded(
@@ -1670,6 +1671,7 @@ class _StaffScheduleWorkingListTabState extends State<StaffScheduleWorkingListTa
                       if (picked != null) {
                         setState(() => _selectedDate = picked);
                         _fetchTodayPeriods();
+                        _fetchDailyDigest(_selectedDate);
                       }
                     },
                     child: Row(
@@ -1698,6 +1700,7 @@ class _StaffScheduleWorkingListTabState extends State<StaffScheduleWorkingListTa
                 onPressed: () {
                   setState(() => _selectedDate = _selectedDate.add(const Duration(days: 1)));
                   _fetchTodayPeriods();
+                  _fetchDailyDigest(_selectedDate);
                 },
               ),
               const SizedBox(width: 4),
@@ -1709,7 +1712,10 @@ class _StaffScheduleWorkingListTabState extends State<StaffScheduleWorkingListTa
               IconButton(
                 icon: const Icon(Icons.refresh_rounded),
                 tooltip: "Refresh",
-                onPressed: () => _fetchTodayPeriods(),
+                onPressed: () {
+                  _fetchTodayPeriods();
+                  _fetchDailyDigest(_selectedDate);
+                },
               ),
             ],
           ),

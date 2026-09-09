@@ -37,6 +37,7 @@ class AttendanceForegroundService : Service() {
         const val ACTION_START = "ACTION_START"
         const val ACTION_STOP = "ACTION_STOP"
         const val ACTION_UPDATE_GEOFENCE = "ACTION_UPDATE_GEOFENCE"
+        const val ACTION_RESTORE_NOTIFICATION = "ACTION_RESTORE_NOTIFICATION"
 
         // Keys for Intent extras
         const val EXTRA_BASE_URL = "EXTRA_BASE_URL"
@@ -64,7 +65,7 @@ class AttendanceForegroundService : Service() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
 
-    private var baseUrl: String = "https://attenda.srishakthicgpa.in"
+    private var baseUrl: String = "https://app.srishakthicgpa.in"
     private var geofenceLat: Double = 11.0396
     private var geofenceLng: Double = 77.0747
     private var geofenceRadius: Float = 250f
@@ -108,27 +109,26 @@ class AttendanceForegroundService : Service() {
             .putLong("last_heartbeat_ms", lastHeartbeatMs)
             .apply()
 
-        if (intent == null) {
-            // System restarted service (START_STICKY) — restore from SharedPreferences
-            baseUrl = prefs.getString("baseUrl", baseUrl) ?: baseUrl
-            geofenceLat = prefs.getFloat("geofenceLat", geofenceLat.toFloat()).toDouble()
-            geofenceLng = prefs.getFloat("geofenceLng", geofenceLng.toFloat()).toDouble()
-            geofenceRadius = prefs.getFloat("geofenceRadius", geofenceRadius)
-            token = prefs.getString("token", "") ?: ""
-            regNo = prefs.getString("regNo", "") ?: ""
-            deviceSessionId = prefs.getString("deviceSessionId", "") ?: ""
-            startDay = prefs.getString("startDay", "") ?: ""
-            Log.d(TAG, "Restored from prefs: baseUrl=$baseUrl regNo=$regNo startDay=$startDay")
-        } else {
-            intent.getStringExtra(EXTRA_BASE_URL)?.let { baseUrl = it }
+        // Always restore existing valid credentials first
+        baseUrl = prefs.getString("baseUrl", baseUrl) ?: baseUrl
+        geofenceLat = prefs.getFloat("geofenceLat", geofenceLat.toFloat()).toDouble()
+        geofenceLng = prefs.getFloat("geofenceLng", geofenceLng.toFloat()).toDouble()
+        geofenceRadius = prefs.getFloat("geofenceRadius", geofenceRadius)
+        token = prefs.getString("token", token) ?: token
+        regNo = prefs.getString("regNo", regNo) ?: regNo
+        deviceSessionId = prefs.getString("deviceSessionId", deviceSessionId) ?: deviceSessionId
+        startDay = prefs.getString("startDay", startDay) ?: startDay
+
+        if (intent != null) {
+            intent.getStringExtra(EXTRA_BASE_URL)?.takeIf { it.isNotEmpty() }?.let { baseUrl = it }
             if (intent.hasExtra(EXTRA_GEOFENCE_LAT)) {
                 geofenceLat = intent.getDoubleExtra(EXTRA_GEOFENCE_LAT, geofenceLat)
                 geofenceLng = intent.getDoubleExtra(EXTRA_GEOFENCE_LNG, geofenceLng)
                 geofenceRadius = intent.getFloatExtra(EXTRA_GEOFENCE_RADIUS, geofenceRadius)
             }
-            intent.getStringExtra(EXTRA_TOKEN)?.let { token = it }
-            intent.getStringExtra(EXTRA_REG_NO)?.let { regNo = it }
-            intent.getStringExtra(EXTRA_DEVICE_SESSION_ID)?.let { deviceSessionId = it }
+            intent.getStringExtra(EXTRA_TOKEN)?.takeIf { it.isNotEmpty() }?.let { token = it }
+            intent.getStringExtra(EXTRA_REG_NO)?.takeIf { it.isNotEmpty() }?.let { regNo = it }
+            intent.getStringExtra(EXTRA_DEVICE_SESSION_ID)?.takeIf { it.isNotEmpty() }?.let { deviceSessionId = it }
 
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             sdf.timeZone = TimeZone.getTimeZone("GMT+5:30")
@@ -139,9 +139,9 @@ class AttendanceForegroundService : Service() {
                 putFloat("geofenceLat", geofenceLat.toFloat())
                 putFloat("geofenceLng", geofenceLng.toFloat())
                 putFloat("geofenceRadius", geofenceRadius)
-                putString("token", token)
-                putString("regNo", regNo)
-                putString("deviceSessionId", deviceSessionId)
+                if (token.isNotEmpty()) putString("token", token)
+                if (regNo.isNotEmpty()) putString("regNo", regNo)
+                if (deviceSessionId.isNotEmpty()) putString("deviceSessionId", deviceSessionId)
                 putString("startDay", startDay)
                 apply()
             }
@@ -154,6 +154,10 @@ class AttendanceForegroundService : Service() {
                 startLocationUpdates()
                 // Flush any locations queued while service was dead
                 serviceScope.launch { flushNativeOfflineQueue() }
+            }
+            ACTION_RESTORE_NOTIFICATION -> {
+                startForegroundCompat()
+                updateNotification("VisionGate — Location Sync", "Background location tracking is active.")
             }
             ACTION_STOP -> {
                 cancelWorkManagerRestart()
@@ -169,19 +173,52 @@ class AttendanceForegroundService : Service() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        Log.d(TAG, "App swiped — scheduling WorkManager restart.")
-        // Cancel any stale restart job first, then enqueue a fresh one
-        val workRequest = OneTimeWorkRequestBuilder<ServiceRestartWorker>()
-            .setInitialDelay(3, TimeUnit.SECONDS)
-            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-            .build()
+        Log.d(TAG, "App swiped from recents — securing foreground service persistence.")
+        try {
+            // 1. Enqueue expedited WorkManager restart (cannot have initial delay)
+            val workRequest = OneTimeWorkRequestBuilder<ServiceRestartWorker>()
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
 
-        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-            ServiceRestartWorker.WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            workRequest
-        )
-        super.onTaskRemoved(rootIntent)
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                ServiceRestartWorker.WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                workRequest
+            )
+        } catch (e: Throwable) {
+            Log.e(TAG, "WorkManager onTaskRemoved scheduling error: ${e.message}")
+        }
+
+        try {
+            // 2. Schedule AlarmManager exact wake-up fallback (1.5 seconds)
+            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val restartIntent = Intent(applicationContext, AttendanceForegroundService::class.java).apply {
+                action = ACTION_START
+            }
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PendingIntent.getForegroundService(applicationContext, 8888, restartIntent, flags)
+            } else {
+                PendingIntent.getService(applicationContext, 8888, restartIntent, flags)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1500, pendingIntent)
+            } else {
+                am.setExact(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1500, pendingIntent)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "AlarmManager onTaskRemoved fallback error: ${e.message}")
+        }
+
+        try {
+            super.onTaskRemoved(rootIntent)
+        } catch (e: Throwable) {
+            Log.e(TAG, "super.onTaskRemoved error: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
@@ -230,19 +267,35 @@ class AttendanceForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        // deleteIntent: Re-posts ongoing foreground notification immediately if dismissed
+        val restoreIntent = Intent(this, AttendanceForegroundService::class.java).apply {
+            action = ACTION_RESTORE_NOTIFICATION
+        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val deletePendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(this, 9999, restoreIntent, flags)
+        } else {
+            PendingIntent.getService(this, 9999, restoreIntent, flags)
+        }
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
             .setSmallIcon(resources.getIdentifier("ic_launcher", "mipmap", packageName))
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(deletePendingIntent)
             // ONGOING + NO_CLEAR: locks the notification in the shade
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            // PRIORITY_DEFAULT (not LOW) — LOW notifications can be auto-suppressed by the OS
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // PRIORITY_MAX so notification stays permanently on top and cannot be suppressed
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             // Show immediately when service starts (API 31+)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             // Show on lock-screen so user knows tracking is active
@@ -310,9 +363,22 @@ class AttendanceForegroundService : Service() {
     private fun startLocationUpdates() {
         if (locationCallback != null) return
 
+        // Immediately request the last known location for zero-delay map update
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                if (loc != null) {
+                    Log.d(TAG, "Immediate location fix obtained: ${loc.latitude}, ${loc.longitude}")
+                    onLocationChanged(loc)
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Failed to get immediate last location: ${e.message}")
+        }
+
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 120_000L).apply {
-            setMinUpdateIntervalMillis(120_000L)
-            setWaitForAccurateLocation(true)
+            setMinUpdateIntervalMillis(60_000L)
+            setMaxUpdateDelayMillis(120_000L)
+            setWaitForAccurateLocation(false)
         }.build()
 
         locationCallback = object : LocationCallback() {
@@ -468,6 +534,16 @@ class AttendanceForegroundService : Service() {
             if (code in 200..299) {
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
+                val status = json.optString("status", "")
+                if (status == "window_ended" || status == "checked_out") {
+                    Log.d(TAG, "Tracking window ended for today: $status")
+                    stopLocationUpdates()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    conn.disconnect()
+                    return
+                }
+
                 if (json.optBoolean("boundary_warning", false)) {
                     updateNotification("⚠ Boundary Breach", json.optString("warning", "You have left the campus boundary."))
                 } else {

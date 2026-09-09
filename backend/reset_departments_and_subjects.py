@@ -40,14 +40,14 @@ def run_reset():
     print("\n2. Inserting 1 record for each department...")
     dept_id_map = {}
     for code, full_name, hod, email, phone in departments_list:
-        cursor.execute("INSERT INTO departments (name) VALUES (?) RETURNING id", (code,))
+        cursor.execute("INSERT INTO departments (name) VALUES (%s) RETURNING id", (code,))
         res = cursor.fetchone()
         dept_db_id = res[0] if res else None
 
         cursor.execute(
             """
             INSERT INTO acad_departments (code, name, hod_name, hod_email, hod_phone, established_year, status)
-            VALUES (?, ?, ?, ?, ?, 2008, 'active')
+            VALUES (%s, %s, %s, %s, %s, 2008, 'active')
             RETURNING id
             """,
             (code, full_name, hod, email, phone)

@@ -169,12 +169,8 @@ def main():
     except ImportError as e:
         print(f"[!] Warning importing backfill_attendance_values: {e}")
 
-    # 7. Seed Initial Departments, Administrative Users & Demo Roles
-    try:
-        from seed_db_data import run_seed
-        run_migration_step("seed_db_data", run_seed)
-    except ImportError as e:
-        print(f"[!] Warning importing seed_db_data: {e}")
+    # 7. Seed Initial Departments, Administrative Users & Demo Roles (Permanently Disabled)
+    print("\n[i] Step 7: Database seeding is permanently disabled (skipped).")
 
     print("\n======================================================================")
     print(" [✓] All Database Migrations & Initial Setup Completed Successfully")

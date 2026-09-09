@@ -246,7 +246,7 @@ class LocationTrackingService with WidgetsBindingObserver {
           centerLng = lngSum / poly.length;
         }
 
-        final regNo = _activeUser!['regNo'] ?? _activeUser!['reg_no'] ?? '';
+        final regNo = _activeUser!['regNo'] ?? _activeUser!['reg_no'] ?? _activeUser!['username'] ?? '';
         await BackgroundLocationService.start(
           baseUrl: CollegeIPConfig.defaultURL,
           geofenceLat: centerLat,
@@ -349,7 +349,20 @@ class LocationTrackingService with WidgetsBindingObserver {
   /// Re-checks tracking status and resumes or suspends location sharing accordingly.
   /// This eliminates the delay for start/stop of tracking.
   Future<void> onAttendanceMarked() async {
-    if (!_running || _activeToken == null) return;
+    if (_activeToken == null || _activeUser == null) {
+      try {
+        final session = await sessionService.getSession();
+        if (session != null && session.token.isNotEmpty) {
+          _activeToken = session.token;
+          _activeUser = session.user;
+          _deviceSessionId = session.deviceSessionId;
+          _running = true;
+        }
+      } catch (_) {}
+    }
+    if (_activeToken == null) return;
+    _running = true;
+    _trackingSuspended = false;
     await updateLocalAttendanceStatus();
     
     // Instantly capture and flush current location on check-in
@@ -379,7 +392,7 @@ class LocationTrackingService with WidgetsBindingObserver {
           centerLng = lngSum / poly.length;
         }
 
-        final regNo = _activeUser!['regNo'] ?? _activeUser!['reg_no'] ?? '';
+        final regNo = _activeUser!['regNo'] ?? _activeUser!['reg_no'] ?? _activeUser!['username'] ?? '';
         await BackgroundLocationService.start(
           baseUrl: CollegeIPConfig.defaultURL,
           geofenceLat: centerLat,

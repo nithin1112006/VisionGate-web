@@ -61,13 +61,13 @@ def extract_token_from_request(request: Request) -> Optional[str]:
 
 def get_user_by_username(username: str):
     """Get user by username."""
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
     return cursor.fetchone()
 
 
 def get_user_by_reg_no(reg_no: str):
     """Get user by registration number (case-insensitive)."""
-    cursor.execute("SELECT * FROM users WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("SELECT * FROM users WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     return cursor.fetchone()
 
 
@@ -83,14 +83,14 @@ OTHER_STAFF_ROLES = (
 
 def get_other_staff_by_username(username: str):
     """Get other_staff by username."""
-    cursor.execute("SELECT * FROM other_staff WHERE username = ?", (username,))
+    cursor.execute("SELECT * FROM other_staff WHERE username = %s", (username,))
     return cursor.fetchone()
 
 
 def get_other_staff_by_reg_no(reg_no: str):
     """Get other_staff by registration number (case-insensitive)."""
     cursor.execute(
-        "SELECT * FROM other_staff WHERE LOWER(reg_no) = LOWER(?)", (reg_no,)
+        "SELECT * FROM other_staff WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,)
     )
     return cursor.fetchone()
 

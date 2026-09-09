@@ -11,6 +11,7 @@ import '../utils/geofence_check.dart';
 import '../utils/vpn_check.dart';
 import '../services/pre_verification_service.dart';
 import '../services/client_face_prefilter.dart';
+import '../services/location_tracking_service.dart';
 
 String get API_URL => CollegeIPConfig.defaultURL;
 
@@ -1216,6 +1217,7 @@ class _FaceVerificationWidgetState extends State<FaceVerificationWidget> with Si
           _isVerified = true;
           _statusMessage = serverMsg;
         });
+        LocationTrackingService.instance.onAttendanceMarked();
         widget.onVerifiedData?.call(resMap);
         widget.onVerified?.call();
         await Future.delayed(const Duration(seconds: 2));

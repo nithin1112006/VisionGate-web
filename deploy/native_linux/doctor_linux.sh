@@ -82,18 +82,29 @@ else
     report_fail "PostgreSQL service is not running" "Run: sudo systemctl start postgresql"
 fi
 
-DB_USER="attenda"
-DB_PASS="attenda_password"
-DB_NAME="attenda"
+if [ -f "${ROOT_DIR}/.env" ]; then
+    set -a
+    source "${ROOT_DIR}/.env"
+    set +a
+elif [ -f "${ROOT_DIR}/backend/.env" ]; then
+    set -a
+    source "${ROOT_DIR}/backend/.env"
+    set +a
+fi
 
-if PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1;" &>/dev/null; then
-    report_pass "Database connection to '${DB_NAME}' as user '${DB_USER}' succeeded"
+DB_USER="${PG_USER:-attenda}"
+DB_PASS="${PG_PASSWORD:-attenda_password}"
+DB_NAME="${PG_DB:-attenda}"
+DB_PORT="${PG_PORT:-5434}"
+
+if PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1;" &>/dev/null; then
+    report_pass "Database connection to '${DB_NAME}' as user '${DB_USER}' on port ${DB_PORT} succeeded"
     
-    TABLE_COUNT=$(PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';")
+    TABLE_COUNT=$(PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';")
     report_pass "Database tables verified: ${TABLE_COUNT} tables active"
 
     # Check pgvector
-    HAS_VECTOR=$(PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT 1 FROM pg_extension WHERE extname='vector';" || true)
+    HAS_VECTOR=$(PGPASSWORD="${DB_PASS}" psql -h 127.0.0.1 -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -tAc "SELECT 1 FROM pg_extension WHERE extname='vector';" || true)
     if [ "${HAS_VECTOR}" = "1" ]; then
         report_pass "pgvector extension is installed and active"
     else

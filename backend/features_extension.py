@@ -75,7 +75,7 @@ def write_audit_log(
             """
             INSERT INTO audit_log
             (actor_reg_no, actor_name, actor_role, action_type, entity_type, entity_id, details, ip_address, success)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
             (
                 actor_reg_no or "system",
@@ -126,7 +126,7 @@ def get_current_user_context(request: Request) -> Dict[str, Any]:
 
     # 1. Check regular users (admin, hod, staff, principal, dean, etc.)
     cursor.execute(
-        "SELECT id, username, password_hash, reg_no, name, dept, role, suspended FROM users WHERE username = ? OR LOWER(reg_no) = LOWER(?)",
+        "SELECT id, username, password_hash, reg_no, name, dept, role, suspended FROM users WHERE username = %s OR LOWER(reg_no) = LOWER(%s)",
         (username, username),
     )
     u_row = cursor.fetchone()
@@ -156,7 +156,7 @@ def get_current_user_context(request: Request) -> Dict[str, Any]:
 
     # 2. Check other_staff
     cursor.execute(
-        "SELECT id, username, password_hash, reg_no, name, dept, role, suspended FROM other_staff WHERE username = ? OR LOWER(reg_no) = LOWER(?)",
+        "SELECT id, username, password_hash, reg_no, name, dept, role, suspended FROM other_staff WHERE username = %s OR LOWER(reg_no) = LOWER(%s)",
         (username, username),
     )
     os_row = cursor.fetchone()
@@ -186,7 +186,7 @@ def get_current_user_context(request: Request) -> Dict[str, Any]:
 
     # 3. Check students
     cursor.execute(
-        "SELECT id, reg_no, name, dept, batch, semester, section, password_hash FROM students WHERE LOWER(reg_no) = LOWER(?)",
+        "SELECT id, reg_no, name, dept, batch, semester, section, password_hash FROM students WHERE LOWER(reg_no) = LOWER(%s)",
         (username,),
     )
     st_row = cursor.fetchone()
@@ -272,7 +272,7 @@ async def get_dashboard_today_summary(request: Request):
         """
         SELECT status, in_time, out_time
         FROM daily_attendance_status
-        WHERE reg_no = ? AND date = ?
+        WHERE reg_no = %s AND date = %s
     """,
         (reg_no, today_str),
     )
@@ -291,15 +291,15 @@ async def get_dashboard_today_summary(request: Request):
             """
             SELECT status, COUNT(*)
             FROM daily_attendance_status
-            WHERE date = ?
+            WHERE date = %s
             GROUP BY status
         """,
             (today_str,),
         )
         counts = dict(cursor.fetchall())
-        p_count = counts.get("Present", 0)
-        hd_count = counts.get("Half Day", 0)
-        l_count = counts.get("On Leave", 0)
+        p_count = counts.get("Present", 0) + counts.get("On Duty (OD)", 0) + counts.get("OD", 0)
+        hd_count = sum(cnt for st, cnt in counts.items() if "Half Day" in str(st) and "Leave" not in str(st))
+        l_count = counts.get("On Leave", 0) + counts.get("Leave", 0) + sum(cnt for st, cnt in counts.items() if "Half Day Leave" in str(st))
         a_count = max(0, tot - (p_count + hd_count + l_count))
 
         summary["metrics"] = {
@@ -311,22 +311,22 @@ async def get_dashboard_today_summary(request: Request):
             "attendance_percentage": round((p_count + (hd_count * 0.5)) / max(tot, 1) * 100, 1),
         }
     elif role in ["hod", "head of department", "dean"]:
-        cursor.execute("SELECT COUNT(*) FROM users WHERE LOWER(dept) = LOWER(?) AND suspended = FALSE", (dept,))
+        cursor.execute("SELECT COUNT(*) FROM users WHERE LOWER(dept) = LOWER(%s) AND suspended = FALSE", (dept,))
         tot = cursor.fetchone()[0] or 0
         cursor.execute(
             """
             SELECT d.status, COUNT(*)
             FROM daily_attendance_status d
             JOIN users u ON LOWER(d.reg_no) = LOWER(u.reg_no)
-            WHERE d.date = ? AND LOWER(u.dept) = LOWER(?)
+            WHERE d.date = %s AND LOWER(u.dept) = LOWER(%s)
             GROUP BY d.status
         """,
             (today_str, dept),
         )
         counts = dict(cursor.fetchall())
-        p_count = counts.get("Present", 0)
-        hd_count = counts.get("Half Day", 0)
-        l_count = counts.get("On Leave", 0)
+        p_count = counts.get("Present", 0) + counts.get("On Duty (OD)", 0) + counts.get("OD", 0)
+        hd_count = sum(cnt for st, cnt in counts.items() if "Half Day" in str(st) and "Leave" not in str(st))
+        l_count = counts.get("On Leave", 0) + counts.get("Leave", 0) + sum(cnt for st, cnt in counts.items() if "Half Day Leave" in str(st))
         a_count = max(0, tot - (p_count + hd_count + l_count))
 
         summary["metrics"] = {
@@ -353,7 +353,7 @@ async def get_dashboard_upcoming_leaves(request: Request):
         """
         SELECT id, leave_type, start_date, end_date, reason, status
         FROM leave_requests
-        WHERE LOWER(user_reg_no) = LOWER(?) AND start_date >= ? AND LOWER(status) = 'approved'
+        WHERE LOWER(user_reg_no) = LOWER(%s) AND start_date >= %s AND LOWER(status) = 'approved'
         ORDER BY start_date ASC
         LIMIT 5
     """,
@@ -377,7 +377,7 @@ async def get_dashboard_upcoming_leaves(request: Request):
         """
         SELECT id, holiday_date, holiday_name, holiday_type
         FROM holiday_calendar
-        WHERE holiday_date >= ?
+        WHERE holiday_date >= %s
         ORDER BY holiday_date ASC
         LIMIT 5
     """,
@@ -408,9 +408,9 @@ async def get_dashboard_announcements(request: Request):
         """
         SELECT id, title, content, target_audience, target_dept, priority, created_by, created_at
         FROM system_announcements
-        WHERE (expires_at IS NULL OR expires_at >= ?)
-          AND (target_audience = 'All' OR LOWER(target_audience) = LOWER(?) OR target_audience = 'Staff')
-          AND (target_dept IS NULL OR target_dept = '' OR LOWER(target_dept) = LOWER(?))
+        WHERE (expires_at IS NULL OR expires_at >= %s)
+          AND (target_audience = 'All' OR LOWER(target_audience) = LOWER(%s) OR target_audience = 'Staff')
+          AND (target_dept IS NULL OR target_dept = '' OR LOWER(target_dept) = LOWER(%s))
         ORDER BY created_at DESC
         LIMIT 10
     """,
@@ -451,7 +451,7 @@ async def create_system_announcement(request: Request, body: Dict[str, Any] = Bo
         """
         INSERT INTO system_announcements
         (title, content, target_audience, target_dept, priority, expires_at, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """,
         (title, content, target_audience, target_dept, priority, expires_at, user.get("name", "admin")),
     )
@@ -473,7 +473,7 @@ async def create_system_announcement(request: Request, body: Dict[str, Any] = Bo
 async def delete_system_announcement(announcement_id: int, request: Request):
     """Delete an announcement — Admin only."""
     user = require_admin(request)
-    cursor.execute("DELETE FROM system_announcements WHERE id = ?", (announcement_id,))
+    cursor.execute("DELETE FROM system_announcements WHERE id = %s", (announcement_id,))
     write_audit_log(
         action_type="DELETE_ANNOUNCEMENT",
         actor_reg_no=user.get("reg_no"),
@@ -517,7 +517,7 @@ async def update_regularisation_window(request: Request, body: Dict[str, Any] = 
     cursor.execute(
         """
         UPDATE attendance_regularisation_window
-        SET max_correction_days = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+        SET max_correction_days = %s, updated_at = CURRENT_TIMESTAMP, updated_by = %s
         WHERE id = 1
     """,
         (days, user.get("name", "admin")),
@@ -576,7 +576,7 @@ async def submit_attendance_correction(request: Request, body: Dict[str, Any] = 
 
     # Check for existing pending request on same date
     cursor.execute(
-        "SELECT id FROM attendance_corrections WHERE reg_no = ? AND requested_date = ? AND status = 'Pending'",
+        "SELECT id FROM attendance_corrections WHERE reg_no = %s AND requested_date = %s AND status = 'Pending'",
         (reg_no, requested_date_str),
     )
     if cursor.fetchone():
@@ -586,7 +586,7 @@ async def submit_attendance_correction(request: Request, body: Dict[str, Any] = 
         """
         INSERT INTO attendance_corrections
         (reg_no, user_name, role, dept, requested_date, requested_check_in, requested_check_out, requested_status, reason, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Pending')
     """,
         (
             reg_no,
@@ -606,7 +606,7 @@ async def submit_attendance_correction(request: Request, body: Dict[str, Any] = 
         """
         INSERT INTO notifications_all_roles
         (target_role, target_dept, title, message, type, created_by)
-        VALUES ('hod', ?, ?, ?, 'attendance_correction', ?)
+        VALUES ('hod', %s, %s, %s, 'attendance_correction', %s)
     """,
         (
             user.get("dept", ""),
@@ -630,7 +630,7 @@ async def get_my_attendance_corrections(request: Request):
         SELECT id, requested_date, requested_check_in, requested_check_out, requested_status,
                reason, status, reviewer_name, review_remarks, reviewed_at, created_at
         FROM attendance_corrections
-        WHERE reg_no = ?
+        WHERE reg_no = %s
         ORDER BY created_at DESC
     """,
         (reg_no,),
@@ -680,7 +680,7 @@ async def get_pending_attendance_corrections(request: Request):
             SELECT id, reg_no, user_name, role, dept, requested_date, requested_check_in,
                    requested_check_out, requested_status, reason, created_at
             FROM attendance_corrections
-            WHERE status = 'Pending' AND LOWER(dept) = LOWER(?)
+            WHERE status = 'Pending' AND LOWER(dept) = LOWER(%s)
             ORDER BY created_at ASC
         """,
             (dept,),
@@ -722,7 +722,7 @@ async def get_attendance_corrections_history(request: Request, limit: int = 100)
             FROM attendance_corrections
             WHERE status != 'Pending'
             ORDER BY reviewed_at DESC
-            LIMIT ?
+            LIMIT %s
         """,
             (limit,),
         )
@@ -732,9 +732,9 @@ async def get_attendance_corrections_history(request: Request, limit: int = 100)
             SELECT id, reg_no, user_name, role, dept, requested_date, requested_status,
                    status, reviewer_name, review_remarks, reviewed_at, created_at
             FROM attendance_corrections
-            WHERE status != 'Pending' AND LOWER(dept) = LOWER(?)
+            WHERE status != 'Pending' AND LOWER(dept) = LOWER(%s)
             ORDER BY reviewed_at DESC
-            LIMIT ?
+            LIMIT %s
         """,
             (dept, limit),
         )
@@ -771,7 +771,7 @@ async def approve_attendance_correction(correction_id: int, request: Request, bo
     user = require_hod_or_admin(request)
     remarks = body.get("remarks", "Approved by administrator").strip()
 
-    cursor.execute("SELECT reg_no, user_name, dept, requested_date, requested_check_in, requested_check_out, requested_status, role FROM attendance_corrections WHERE id = ?", (correction_id,))
+    cursor.execute("SELECT reg_no, user_name, dept, requested_date, requested_check_in, requested_check_out, requested_status, role FROM attendance_corrections WHERE id = %s", (correction_id,))
     req = cursor.fetchone()
     if not req:
         raise HTTPException(status_code=404, detail="Correction request not found")
@@ -784,7 +784,7 @@ async def approve_attendance_correction(correction_id: int, request: Request, bo
     cursor.execute(
         """
         INSERT INTO daily_attendance_status (reg_no, name, dept, date, status, in_time, out_time, is_manual_override, override_by, override_reason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s)
         ON CONFLICT (reg_no, date) DO UPDATE SET
             status = EXCLUDED.status,
             name = COALESCE(EXCLUDED.name, daily_attendance_status.name),
@@ -804,8 +804,8 @@ async def approve_attendance_correction(correction_id: int, request: Request, bo
     cursor.execute(
         """
         UPDATE attendance_corrections
-        SET status = 'Approved', reviewer_reg_no = ?, reviewer_name = ?, review_remarks = ?, reviewed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'Approved', reviewer_reg_no = %s, reviewer_name = %s, review_remarks = %s, reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = %s
     """,
         (user.get("reg_no"), user.get("name"), remarks, correction_id),
     )
@@ -814,7 +814,7 @@ async def approve_attendance_correction(correction_id: int, request: Request, bo
     cursor.execute(
         """
         INSERT INTO notifications_all_roles (recipient_reg_no, title, message, type, created_by)
-        VALUES (?, ?, ?, 'attendance_correction_approved', ?)
+        VALUES (%s, %s, %s, 'attendance_correction_approved', %s)
     """,
         (
             reg_no,
@@ -825,7 +825,7 @@ async def approve_attendance_correction(correction_id: int, request: Request, bo
     )
 
     # 4. Attempt Email Dispatch
-    cursor.execute("SELECT username FROM users WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("SELECT username FROM users WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     email_row = cursor.fetchone()
     if email_row and "@" in (email_row[0] or ""):
         notify_attendance_correction_outcome(
@@ -860,7 +860,7 @@ async def reject_attendance_correction(correction_id: int, request: Request, bod
     if not remarks:
         raise HTTPException(status_code=400, detail="Rejection reason is required")
 
-    cursor.execute("SELECT reg_no, user_name, requested_date, requested_status FROM attendance_corrections WHERE id = ?", (correction_id,))
+    cursor.execute("SELECT reg_no, user_name, requested_date, requested_status FROM attendance_corrections WHERE id = %s", (correction_id,))
     req = cursor.fetchone()
     if not req:
         raise HTTPException(status_code=404, detail="Correction request not found")
@@ -870,8 +870,8 @@ async def reject_attendance_correction(correction_id: int, request: Request, bod
     cursor.execute(
         """
         UPDATE attendance_corrections
-        SET status = 'Rejected', reviewer_reg_no = ?, reviewer_name = ?, review_remarks = ?, reviewed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'Rejected', reviewer_reg_no = %s, reviewer_name = %s, review_remarks = %s, reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = %s
     """,
         (user.get("reg_no"), user.get("name"), remarks, correction_id),
     )
@@ -880,7 +880,7 @@ async def reject_attendance_correction(correction_id: int, request: Request, bod
     cursor.execute(
         """
         INSERT INTO notifications_all_roles (recipient_reg_no, title, message, type, created_by)
-        VALUES (?, ?, ?, 'attendance_correction_rejected', ?)
+        VALUES (%s, %s, %s, 'attendance_correction_rejected', %s)
     """,
         (
             reg_no,
@@ -891,7 +891,7 @@ async def reject_attendance_correction(correction_id: int, request: Request, bod
     )
 
     # Email
-    cursor.execute("SELECT username FROM users WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("SELECT username FROM users WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     email_row = cursor.fetchone()
     if email_row and "@" in (email_row[0] or ""):
         notify_attendance_correction_outcome(
@@ -941,7 +941,7 @@ async def get_daily_register_report(
                COALESCE(d.status, 'Absent') AS attendance_status,
                d.in_time, d.out_time, d.is_manual_override
         FROM users u
-        LEFT JOIN daily_attendance_status d ON (LOWER(u.reg_no) = LOWER(d.reg_no) AND d.date = ?)
+        LEFT JOIN daily_attendance_status d ON (LOWER(u.reg_no) = LOWER(d.reg_no) AND d.date = %s)
         WHERE u.suspended = FALSE
     """
 
@@ -1057,7 +1057,7 @@ async def get_monthly_attendance_summary(
                COUNT(CASE WHEN d.status = 'On Leave' THEN 1 END) as leave_days,
                COUNT(CASE WHEN d.status = 'Absent' THEN 1 END) as absent_days
         FROM users u
-        LEFT JOIN daily_attendance_status d ON (LOWER(u.reg_no) = LOWER(d.reg_no) AND d.date >= ? AND d.date <= ?)
+        LEFT JOIN daily_attendance_status d ON (LOWER(u.reg_no) = LOWER(d.reg_no) AND d.date >= %s AND d.date <= %s)
         WHERE u.suspended = FALSE
     """
     params: List[Any] = [start_date, end_date]
@@ -1141,7 +1141,7 @@ async def get_department_attendance_heatmap(
         SELECT d.date, u.name, u.reg_no, u.dept, d.status
         FROM daily_attendance_status d
         JOIN users u ON LOWER(d.reg_no) = LOWER(u.reg_no)
-        WHERE d.date >= ? AND d.date <= ?
+        WHERE d.date >= %s AND d.date <= %s
     """
     params: List[Any] = [start_str, end_str]
     if target_dept:
@@ -1284,7 +1284,7 @@ async def get_absenteeism_trend_report(request: Request, days: int = 30):
                COUNT(CASE WHEN status = 'Absent' THEN 1 END) as absent_count,
                COUNT(*) as total_logged
         FROM daily_attendance_status
-        WHERE date >= ? AND date <= ?
+        WHERE date >= %s AND date <= %s
         GROUP BY date
         ORDER BY date ASC
     """,
@@ -1317,7 +1317,7 @@ async def get_face_recognition_failures_report(request: Request, limit: int = 10
         FROM audit_log
         WHERE success = FALSE OR action_type IN ('LOCKOUT', 'FAILED_ATTEMPT', 'FACE_VERIFY_FAIL', 'SPOOF_DETECTED')
         ORDER BY timestamp DESC
-        LIMIT ?
+        LIMIT %s
     """,
         (limit,),
     )
@@ -1351,9 +1351,9 @@ async def get_user_notifications(request: Request, unread_only: bool = False, li
     query = """
         SELECT id, title, message, type, is_read, metadata, created_at, created_by
         FROM notifications_all_roles
-        WHERE (LOWER(recipient_reg_no) = LOWER(?)
-           OR (target_role IS NOT NULL AND LOWER(target_role) = LOWER(?))
-           OR (target_dept IS NOT NULL AND LOWER(target_dept) = LOWER(?)))
+        WHERE (LOWER(recipient_reg_no) = LOWER(%s)
+           OR (target_role IS NOT NULL AND LOWER(target_role) = LOWER(%s))
+           OR (target_dept IS NOT NULL AND LOWER(target_dept) = LOWER(%s)))
     """
     params: List[Any] = [reg_no, role, dept]
 
@@ -1370,9 +1370,9 @@ async def get_user_notifications(request: Request, unread_only: bool = False, li
         """
         SELECT COUNT(*)
         FROM notifications_all_roles
-        WHERE (LOWER(recipient_reg_no) = LOWER(?)
-           OR (target_role IS NOT NULL AND LOWER(target_role) = LOWER(?))
-           OR (target_dept IS NOT NULL AND LOWER(target_dept) = LOWER(?)))
+        WHERE (LOWER(recipient_reg_no) = LOWER(%s)
+           OR (target_role IS NOT NULL AND LOWER(target_role) = LOWER(%s))
+           OR (target_dept IS NOT NULL AND LOWER(target_dept) = LOWER(%s)))
           AND is_read = FALSE
     """,
         (reg_no, role, dept),
@@ -1400,7 +1400,7 @@ async def get_user_notifications(request: Request, unread_only: bool = False, li
 async def mark_notification_as_read(notification_id: int, request: Request):
     """Mark a notification as read."""
     get_current_user_context(request)
-    cursor.execute("UPDATE notifications_all_roles SET is_read = TRUE WHERE id = ?", (notification_id,))
+    cursor.execute("UPDATE notifications_all_roles SET is_read = TRUE WHERE id = %s", (notification_id,))
     return {"success": True, "message": "Notification marked as read"}
 
 
@@ -1410,7 +1410,7 @@ async def mark_all_notifications_as_read(request: Request):
     user = get_current_user_context(request)
     reg_no = user.get("reg_no", "")
     cursor.execute(
-        "UPDATE notifications_all_roles SET is_read = TRUE WHERE LOWER(recipient_reg_no) = LOWER(?)",
+        "UPDATE notifications_all_roles SET is_read = TRUE WHERE LOWER(recipient_reg_no) = LOWER(%s)",
         (reg_no,),
     )
     return {"success": True, "message": "All notifications marked as read"}
@@ -1423,7 +1423,7 @@ async def get_notification_preferences(request: Request):
     reg_no = user.get("reg_no", "")
 
     cursor.execute(
-        "SELECT email_enabled, push_enabled, leave_alerts, attendance_alerts, announcement_alerts FROM notification_preferences WHERE LOWER(reg_no) = LOWER(?)",
+        "SELECT email_enabled, push_enabled, leave_alerts, attendance_alerts, announcement_alerts FROM notification_preferences WHERE LOWER(reg_no) = LOWER(%s)",
         (reg_no,),
     )
     row = cursor.fetchone()
@@ -1466,7 +1466,7 @@ async def update_notification_preferences(request: Request, body: Dict[str, Any]
     cursor.execute(
         """
         INSERT INTO notification_preferences (reg_no, email_enabled, push_enabled, leave_alerts, attendance_alerts, announcement_alerts, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
         ON CONFLICT (reg_no) DO UPDATE SET
             email_enabled = EXCLUDED.email_enabled,
             push_enabled = EXCLUDED.push_enabled,
@@ -1497,7 +1497,7 @@ async def broadcast_notification(request: Request, body: Dict[str, Any] = Body(.
     cursor.execute(
         """
         INSERT INTO notifications_all_roles (target_role, target_dept, title, message, type, created_by)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """,
         (target_role, target_dept, title, message, notif_type, user.get("name", "admin")),
     )
@@ -1529,7 +1529,7 @@ async def get_active_sessions(request: Request, limit: int = 100):
         FROM active_sessions
         WHERE is_active = TRUE
         ORDER BY last_activity DESC
-        LIMIT ?
+        LIMIT %s
     """,
         (limit,),
     )
@@ -1555,7 +1555,7 @@ async def get_active_sessions(request: Request, limit: int = 100):
 async def revoke_active_session(session_id: str, request: Request):
     """Revoke a single active login session — Admin only."""
     user = require_admin(request)
-    cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE session_id = ?", (session_id,))
+    cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE session_id = %s", (session_id,))
     write_audit_log(
         action_type="REVOKE_SESSION",
         actor_reg_no=user.get("reg_no"),
@@ -1573,7 +1573,7 @@ async def revoke_active_session(session_id: str, request: Request):
 async def terminate_all_user_sessions(reg_no: str, request: Request):
     """Terminate all active sessions for a user — Admin only."""
     user = require_admin(request)
-    cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     write_audit_log(
         action_type="TERMINATE_USER_SESSIONS",
         actor_reg_no=user.get("reg_no"),
@@ -1596,7 +1596,7 @@ async def get_login_attempts_log(request: Request, limit: int = 100):
         SELECT id, username, ip_address, success, reason, attempted_at
         FROM login_attempts_log
         ORDER BY attempted_at DESC
-        LIMIT ?
+        LIMIT %s
     """,
         (limit,),
     )
@@ -1631,7 +1631,7 @@ async def setup_totp_2fa(request: Request):
     cursor.execute(
         """
         INSERT INTO totp_secrets (reg_no, secret_key, is_enabled, backup_codes)
-        VALUES (?, ?, FALSE, '')
+        VALUES (%s, %s, FALSE, '')
         ON CONFLICT (reg_no) DO UPDATE SET secret_key = EXCLUDED.secret_key, is_enabled = FALSE
     """,
         (reg_no, secret),
@@ -1655,7 +1655,7 @@ async def verify_and_enable_2fa(request: Request, body: Dict[str, Any] = Body(..
     if not code:
         raise HTTPException(status_code=400, detail="6-digit authentication code required")
 
-    cursor.execute("SELECT secret_key FROM totp_secrets WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("SELECT secret_key FROM totp_secrets WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     row = cursor.fetchone()
     if not row or not row[0]:
         raise HTTPException(status_code=400, detail="No 2FA setup in progress. Initiate setup first.")
@@ -1665,7 +1665,7 @@ async def verify_and_enable_2fa(request: Request, body: Dict[str, Any] = Body(..
     if not totp.verify(code):
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    cursor.execute("UPDATE totp_secrets SET is_enabled = TRUE, enabled_at = CURRENT_TIMESTAMP WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("UPDATE totp_secrets SET is_enabled = TRUE, enabled_at = CURRENT_TIMESTAMP WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     write_audit_log(
         action_type="ENABLE_2FA",
         actor_reg_no=reg_no,
@@ -1716,8 +1716,8 @@ async def update_smtp_settings(request: Request, body: Dict[str, Any] = Body(...
     cursor.execute(
         """
         UPDATE smtp_config
-        SET host = ?, port = ?, username = ?, password = ?, sender_email = ?,
-            sender_name = ?, use_tls = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+        SET host = %s, port = %s, username = %s, password = %s, sender_email = %s,
+            sender_name = %s, use_tls = %s, is_active = %s, updated_at = CURRENT_TIMESTAMP, updated_by = %s
         WHERE id = 1
     """,
         (host, port, username, password, sender_email, sender_name, use_tls, is_active, user.get("name")),
@@ -1774,7 +1774,7 @@ async def toggle_maintenance_mode(request: Request, body: Dict[str, Any] = Body(
     cursor.execute(
         """
         INSERT INTO system_config (key, value, updated_at)
-        VALUES ('maintenance_mode', ?, CURRENT_TIMESTAMP)
+        VALUES ('maintenance_mode', %s, CURRENT_TIMESTAMP)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
     """,
         (str(enabled).lower(),),
@@ -1782,7 +1782,7 @@ async def toggle_maintenance_mode(request: Request, body: Dict[str, Any] = Body(
     cursor.execute(
         """
         INSERT INTO system_config (key, value, updated_at)
-        VALUES ('maintenance_message', ?, CURRENT_TIMESTAMP)
+        VALUES ('maintenance_message', %s, CURRENT_TIMESTAMP)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
     """,
         (msg,),
@@ -1819,7 +1819,7 @@ async def update_antispoofing_config(request: Request, body: Dict[str, Any] = Bo
     cursor.execute(
         """
         INSERT INTO system_config (key, value, updated_at)
-        VALUES ('antispoofing_enabled', ?, CURRENT_TIMESTAMP)
+        VALUES ('antispoofing_enabled', %s, CURRENT_TIMESTAMP)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
     """,
         (str(enabled).lower(),),
@@ -1914,7 +1914,7 @@ async def add_holiday(request: Request, body: Dict[str, Any] = Body(...)):
     cursor.execute(
         """
         INSERT INTO holiday_calendar (holiday_date, holiday_name, holiday_type, is_optional, academic_year, created_by)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (holiday_date) DO UPDATE SET
             holiday_name = EXCLUDED.holiday_name,
             holiday_type = EXCLUDED.holiday_type,
@@ -1941,7 +1941,7 @@ async def add_holiday(request: Request, body: Dict[str, Any] = Body(...)):
 async def delete_holiday(holiday_id: int, request: Request):
     """Delete a holiday — Admin only."""
     user = require_admin(request)
-    cursor.execute("DELETE FROM holiday_calendar WHERE id = ?", (holiday_id,))
+    cursor.execute("DELETE FROM holiday_calendar WHERE id = %s", (holiday_id,))
     write_audit_log(
         action_type="DELETE_HOLIDAY",
         actor_reg_no=user.get("reg_no"),
@@ -1972,7 +1972,7 @@ async def get_detailed_leave_balance(reg_no: str, request: Request):
         """
         SELECT leave_type, COUNT(*)
         FROM leave_requests
-        WHERE LOWER(user_reg_no) = LOWER(?) AND LOWER(status) = 'approved'
+        WHERE LOWER(user_reg_no) = LOWER(%s) AND LOWER(status) = 'approved'
         GROUP BY leave_type
     """,
         (reg_no,),
@@ -1992,7 +1992,7 @@ async def get_detailed_leave_balance(reg_no: str, request: Request):
         """
         SELECT COALESCE(SUM(days_earned), 0)
         FROM comp_off_accrual
-        WHERE LOWER(reg_no) = LOWER(?) AND status = 'Available' AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
+        WHERE LOWER(reg_no) = LOWER(%s) AND status = 'Available' AND (expiry_date IS NULL OR expiry_date >= CURRENT_DATE)
     """,
         (reg_no,),
     )
@@ -2028,7 +2028,7 @@ async def get_team_leave_calendar(request: Request, month: Optional[str] = None,
         FROM leave_requests l
         JOIN users u ON LOWER(l.user_reg_no) = LOWER(u.reg_no)
         WHERE LOWER(l.status) = 'approved'
-          AND ((l.start_date >= ? AND l.start_date <= ?) OR (l.end_date >= ? AND l.end_date <= ?))
+          AND ((l.start_date >= %s AND l.start_date <= %s) OR (l.end_date >= %s AND l.end_date <= %s))
     """
 
     params: List[Any] = [start_date, end_date, start_date, end_date]
@@ -2070,7 +2070,7 @@ async def accrue_comp_off(request: Request, body: Dict[str, Any] = Body(...)):
     if not reg_no or not duty_date:
         raise HTTPException(status_code=400, detail="Staff Reg No and Duty Date required")
 
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
     u_row = cursor.fetchone()
     staff_name = u_row[0] if u_row else reg_no
 
@@ -2079,7 +2079,7 @@ async def accrue_comp_off(request: Request, body: Dict[str, Any] = Body(...)):
     cursor.execute(
         """
         INSERT INTO comp_off_accrual (reg_no, staff_name, duty_date, duty_type, days_earned, reason, expiry_date, status, approved_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'Available', ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, 'Available', %s)
     """,
         (reg_no, staff_name, duty_date, duty_type, days_earned, reason, exp_date, user.get("name")),
     )
@@ -2105,7 +2105,7 @@ async def accrue_comp_off(request: Request, body: Dict[str, Any] = Body(...)):
 async def get_user_activity_timeline(user_id: int, request: Request):
     """Retrieve full activity history for a staff member (attendance, leaves, audits) — Admin only."""
     require_admin(request)
-    cursor.execute("SELECT reg_no, name, dept, role FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT reg_no, name, dept, role FROM users WHERE id = %s", (user_id,))
     user_row = cursor.fetchone()
     if not user_row:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2117,7 +2117,7 @@ async def get_user_activity_timeline(user_id: int, request: Request):
         """
         SELECT date, status, in_time, out_time
         FROM daily_attendance_status
-        WHERE LOWER(reg_no) = LOWER(?)
+        WHERE LOWER(reg_no) = LOWER(%s)
         ORDER BY date DESC
         LIMIT 20
     """,
@@ -2133,7 +2133,7 @@ async def get_user_activity_timeline(user_id: int, request: Request):
         """
         SELECT leave_type, start_date, end_date, status, reason
         FROM leave_requests
-        WHERE LOWER(user_reg_no) = LOWER(?)
+        WHERE LOWER(user_reg_no) = LOWER(%s)
         ORDER BY start_date DESC
         LIMIT 10
     """,
@@ -2150,7 +2150,7 @@ async def get_user_activity_timeline(user_id: int, request: Request):
         """
         SELECT timestamp, action_type, details, ip_address
         FROM audit_log
-        WHERE LOWER(actor_reg_no) = LOWER(?)
+        WHERE LOWER(actor_reg_no) = LOWER(%s)
         ORDER BY timestamp DESC
         LIMIT 15
     """,
@@ -2180,8 +2180,8 @@ async def bulk_deactivate_users(request: Request, body: Dict[str, Any] = Body(..
 
     deactivated = 0
     for r in reg_nos:
-        cursor.execute("UPDATE users SET suspended = TRUE WHERE LOWER(reg_no) = LOWER(?)", (r,))
-        cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE LOWER(reg_no) = LOWER(?)", (r,))
+        cursor.execute("UPDATE users SET suspended = TRUE WHERE LOWER(reg_no) = LOWER(%s)", (r,))
+        cursor.execute("UPDATE active_sessions SET is_active = FALSE WHERE LOWER(reg_no) = LOWER(%s)", (r,))
         deactivated += 1
 
     write_audit_log(
@@ -2208,7 +2208,7 @@ async def transfer_user_department(user_id: int, request: Request, body: Dict[st
     if not new_dept:
         raise HTTPException(status_code=400, detail="New department is required")
 
-    cursor.execute("SELECT reg_no, name, dept, role FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT reg_no, name, dept, role FROM users WHERE id = %s", (user_id,))
     u_row = cursor.fetchone()
     if not u_row:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2216,12 +2216,12 @@ async def transfer_user_department(user_id: int, request: Request, body: Dict[st
     reg_no, name, old_dept, old_role = u_row[0], u_row[1], u_row[2], u_row[3]
     eff_role = new_role if new_role else old_role
 
-    cursor.execute("UPDATE users SET dept = ?, role = ? WHERE id = ?", (new_dept, eff_role, user_id))
+    cursor.execute("UPDATE users SET dept = %s, role = %s WHERE id = %s", (new_dept, eff_role, user_id))
 
     cursor.execute(
         """
         INSERT INTO user_transfers_log (user_id, reg_no, old_dept, new_dept, old_role, new_role, remarks, transferred_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """,
         (user_id, reg_no, old_dept, new_dept, old_role, eff_role, remarks, admin_user.get("name")),
     )
@@ -2244,7 +2244,7 @@ async def transfer_user_department(user_id: int, request: Request, body: Dict[st
 async def force_password_reset(user_id: int, request: Request):
     """Set flag mandating password reset on the user's next login — Admin only."""
     admin_user = require_admin(request)
-    cursor.execute("SELECT reg_no, name FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT reg_no, name FROM users WHERE id = %s", (user_id,))
     u_row = cursor.fetchone()
     if not u_row:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2253,7 +2253,7 @@ async def force_password_reset(user_id: int, request: Request):
     cursor.execute(
         """
         INSERT INTO user_security_flags (reg_no, force_password_reset, updated_at)
-        VALUES (?, TRUE, CURRENT_TIMESTAMP)
+        VALUES (%s, TRUE, CURRENT_TIMESTAMP)
         ON CONFLICT (reg_no) DO UPDATE SET force_password_reset = TRUE, updated_at = CURRENT_TIMESTAMP
     """,
         (reg_no,),
@@ -2289,7 +2289,7 @@ async def get_substitute_assignments(request: Request, assignment_date: Optional
                substitute_staff_name, dept, batch, semester, section, subject_code,
                subject_name, assignment_date, period_number, status, reason, assigned_by
         FROM substitute_assignments
-        WHERE assignment_date = ?
+        WHERE assignment_date = %s
     """
     params: List[Any] = [target_date]
     if target_dept:
@@ -2341,11 +2341,11 @@ async def assign_substitute_faculty(request: Request, body: Dict[str, Any] = Bod
     if not orig_reg or not sub_reg or not assignment_date:
         raise HTTPException(status_code=400, detail="Original staff, substitute staff, and assignment date are required")
 
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?)", (orig_reg,))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s)", (orig_reg,))
     o_row = cursor.fetchone()
     orig_name = o_row[0] if o_row else orig_reg
 
-    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(?)", (sub_reg,))
+    cursor.execute("SELECT name FROM users WHERE LOWER(reg_no) = LOWER(%s)", (sub_reg,))
     s_row = cursor.fetchone()
     sub_name = s_row[0] if s_row else sub_reg
 
@@ -2354,7 +2354,7 @@ async def assign_substitute_faculty(request: Request, body: Dict[str, Any] = Bod
         INSERT INTO substitute_assignments
         (original_staff_reg_no, original_staff_name, substitute_staff_reg_no, substitute_staff_name,
          dept, batch, semester, section, subject_code, subject_name, assignment_date, period_number, reason, assigned_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """,
         (
             orig_reg,
@@ -2378,7 +2378,7 @@ async def assign_substitute_faculty(request: Request, body: Dict[str, Any] = Bod
     cursor.execute(
         """
         INSERT INTO notifications_all_roles (recipient_reg_no, title, message, type, created_by)
-        VALUES (?, ?, ?, 'substitute_duty', ?)
+        VALUES (%s, %s, %s, 'substitute_duty', %s)
     """,
         (
             sub_reg,
@@ -2405,7 +2405,7 @@ async def assign_substitute_faculty(request: Request, body: Dict[str, Any] = Bod
 async def remove_substitute_assignment(assignment_id: int, request: Request):
     """Remove a substitute assignment — HOD and Admin."""
     user = require_hod_or_admin(request)
-    cursor.execute("DELETE FROM substitute_assignments WHERE id = ?", (assignment_id,))
+    cursor.execute("DELETE FROM substitute_assignments WHERE id = %s", (assignment_id,))
     return {"success": True, "message": "Substitute assignment cancelled"}
 
 
@@ -2417,7 +2417,7 @@ async def get_weekly_timetable_matrix(dept: str, batch: str, semester: int, sect
         """
         SELECT day_of_week, period_number, subject_code, subject_name, staff_reg_no, room_or_lab, is_lab_block, lab_batch
         FROM class_timetable
-        WHERE LOWER(dept) = LOWER(?) AND batch = ? AND semester = ? AND LOWER(section) = LOWER(?)
+        WHERE LOWER(dept) = LOWER(%s) AND batch = %s AND semester = %s AND LOWER(section) = LOWER(%s)
         ORDER BY day_of_week, period_number ASC
     """,
         (dept, batch, semester, section),
@@ -2460,7 +2460,7 @@ async def get_student_attendance_warning(request: Request):
         SELECT COUNT(CASE WHEN status IN ('Present', 'Half Day') THEN 1 END) as attended,
                COUNT(*) as total_days
         FROM daily_attendance_status
-        WHERE LOWER(reg_no) = LOWER(?)
+        WHERE LOWER(reg_no) = LOWER(%s)
     """,
         (reg_no,),
     )
@@ -2504,14 +2504,14 @@ async def get_student_subject_wise_attendance(request: Request):
         """
         SELECT subject_code, subject_name
         FROM subject_faculty_allocations
-        WHERE LOWER(dept) = LOWER(?) AND batch = ? AND semester = ? AND LOWER(section) = LOWER(?)
+        WHERE LOWER(dept) = LOWER(%s) AND batch = %s AND semester = %s AND LOWER(section) = LOWER(%s)
     """,
         (dept, batch, sem, sec),
     )
     subjects = cursor.fetchall()
     if not subjects:
         # Fallback to department subjects
-        cursor.execute("SELECT subject_code, subject_name FROM department_subjects WHERE LOWER(dept) = LOWER(?) AND semester = ?", (dept, sem))
+        cursor.execute("SELECT subject_code, subject_name FROM department_subjects WHERE LOWER(dept) = LOWER(%s) AND semester = %s", (dept, sem))
         subjects = cursor.fetchall()
 
     results = []
@@ -2522,7 +2522,7 @@ async def get_student_subject_wise_attendance(request: Request):
             """
             SELECT COUNT(CASE WHEN status = 'Present' THEN 1 END), COUNT(*)
             FROM student_attendance
-            WHERE LOWER(student_reg_no) = LOWER(?) AND LOWER(subject_code) = LOWER(?)
+            WHERE LOWER(student_reg_no) = LOWER(%s) AND LOWER(subject_code) = LOWER(%s)
         """,
             (reg_no, s_code),
         )
@@ -2532,7 +2532,7 @@ async def get_student_subject_wise_attendance(request: Request):
 
         # If zero period rows yet, mock aggregate based on overall daily status
         if tot == 0:
-            cursor.execute("SELECT COUNT(CASE WHEN status IN ('Present','Half Day') THEN 1 END), COUNT(*) FROM daily_attendance_status WHERE LOWER(reg_no) = LOWER(?)", (reg_no,))
+            cursor.execute("SELECT COUNT(CASE WHEN status IN ('Present','Half Day') THEN 1 END), COUNT(*) FROM daily_attendance_status WHERE LOWER(reg_no) = LOWER(%s)", (reg_no,))
             d_row = cursor.fetchone()
             att = d_row[0] or 0
             tot = d_row[1] or 0
@@ -2565,7 +2565,7 @@ async def submit_student_feedback(request: Request, body: Dict[str, Any] = Body(
     cursor.execute(
         """
         INSERT INTO student_feedback_grievances (student_reg_no, student_name, dept, category, subject, description, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'Open')
+        VALUES (%s, %s, %s, %s, %s, %s, 'Open')
     """,
         (reg_no, user.get("name", "Student"), user.get("dept", ""), category, subject, description),
     )
@@ -2583,7 +2583,7 @@ async def get_student_feedback_list(request: Request):
         """
         SELECT id, category, subject, description, status, admin_remarks, resolved_at, created_at
         FROM student_feedback_grievances
-        WHERE LOWER(student_reg_no) = LOWER(?)
+        WHERE LOWER(student_reg_no) = LOWER(%s)
         ORDER BY created_at DESC
     """,
         (reg_no,),
@@ -2650,8 +2650,8 @@ async def resolve_student_feedback(feedback_id: int, request: Request, body: Dic
     cursor.execute(
         """
         UPDATE student_feedback_grievances
-        SET status = 'Resolved', admin_remarks = ?, resolved_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'Resolved', admin_remarks = %s, resolved_at = CURRENT_TIMESTAMP
+        WHERE id = %s
     """,
         (remarks, feedback_id),
     )

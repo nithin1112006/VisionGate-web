@@ -1291,15 +1291,19 @@ def _credit_leave_attendance(
     lt_lower = (leave_type or "").lower().strip()
     is_od = "od" in lt_lower or "duty" in lt_lower
 
+    which_upper = (which_half or "FN").strip().upper()
+    is_fn = which_upper in ("FN", "FIRST", "FORENOON")
+    is_an = which_upper in ("AN", "SECOND", "AFTERNOON")
+
     if is_od:
-        overall_status = "On Duty (OD)" if not is_half_day else (f"Half Day OD ({which_half or 'FN'})")
-        fh_status = "OD" if (not is_half_day or which_half == "FN") else "Absent"
-        sh_status = "OD" if (not is_half_day or which_half == "AN") else "Absent"
+        overall_status = "On Duty (OD)" if not is_half_day else (f"Half Day OD ({'FN' if is_fn else 'AN'})")
+        fh_status = "OD" if (not is_half_day or is_fn) else "Pending"
+        sh_status = "OD" if (not is_half_day or is_an) else "Pending"
         att_value = 0.5 if is_half_day else 1.0
     else:
-        overall_status = "On Leave" if not is_half_day else (f"Half Day Leave ({which_half or 'FN'})")
-        fh_status = "Leave" if (not is_half_day or which_half == "FN") else "Absent"
-        sh_status = "Leave" if (not is_half_day or which_half == "AN") else "Absent"
+        overall_status = "On Leave" if not is_half_day else (f"Half Day Leave ({'FN' if is_fn else 'AN'})")
+        fh_status = "Leave" if (not is_half_day or is_fn) else "Pending"
+        sh_status = "Leave" if (not is_half_day or is_an) else "Pending"
         att_value = 0.0
 
     working = _working_dates(start, end)
@@ -1319,18 +1323,18 @@ def _credit_leave_attendance(
             final_fh = fh_status
             final_sh = sh_status
             if is_half_day:
-                if which_half == "FN":
+                if is_fn:
                     final_sh = ex_sh or "Pending"
-                elif which_half == "AN":
+                elif is_an:
                     final_fh = ex_fh or "Pending"
             
             # Recalculate attendance value
             calc_val = att_value
             if is_half_day:
                 if is_od:
-                    calc_val = 0.5 + (0.5 if (final_fh == "Present" or final_sh == "Present") else 0.0)
+                    calc_val = 0.5 + (0.5 if (final_fh in ("Present", "OD") or final_sh in ("Present", "OD")) else 0.0)
                 else:
-                    calc_val = 0.5 if (final_fh == "Present" or final_sh == "Present") else 0.0
+                    calc_val = 0.5 if (final_fh in ("Present", "OD") or final_sh in ("Present", "OD")) else 0.0
 
             cursor.execute(
                 """

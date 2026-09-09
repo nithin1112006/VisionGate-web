@@ -201,7 +201,7 @@ class VpnChecker {
       // 3. Primary server VPN check (most reliable)
       try {
         final response = await http.get(
-          Uri.parse('${CollegeIPConfig.defaultURL}/check_vpn'),
+          Uri.parse('${CollegeIPConfig.defaultURL}/api/check_vpn'),
           headers: {'Content-Type': 'application/json'},
         ).timeout(const Duration(seconds: 4));
         

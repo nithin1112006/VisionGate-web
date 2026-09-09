@@ -47,8 +47,8 @@ echo -e "  Python Binary:     ${GREEN}${VENV_PYTHON}${NC}"
 cat << EOF > "${SERVICE_FILE}"
 [Unit]
 Description=VisionGate / Attenda FastAPI Backend Server
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network-online.target postgresql.service postgresql@16-main.service
+Wants=network-online.target postgresql.service postgresql@16-main.service
 
 [Service]
 Type=simple

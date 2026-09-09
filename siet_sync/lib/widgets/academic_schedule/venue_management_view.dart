@@ -173,7 +173,7 @@ class _VenueManagementViewState extends State<VenueManagementView> {
     final vt = venueType.toUpperCase().replaceAll('_', '').replaceAll(' ', '');
     final cc = categoryCode.toUpperCase().replaceAll('_', '').replaceAll(' ', '');
     if (vt == cc) return true;
-    if ((cc == 'LH' || cc == 'LECTUREHALL') && (vt == 'LH' || vt == 'LECTUREHALL')) return true;
+    if ((cc == 'LH' || cc == 'LECTUREHALL') && (vt == 'LH' || vt == 'LECTUREHALL' || vt.startsWith('LH'))) return true;
     if ((cc == 'LAB' || cc == 'LABORATORY') && (vt == 'LAB' || vt == 'LABORATORY')) return true;
     if ((cc == 'SMART' || cc == 'SMARTCLASSROOM') && (vt == 'SMART' || vt == 'SMARTCLASSROOM')) return true;
     if ((cc == 'SEM' || cc == 'SEMINARHALL' || cc == 'SEMINAR') && (vt == 'SEM' || vt == 'SEMINARHALL' || vt == 'SEMINAR')) return true;
