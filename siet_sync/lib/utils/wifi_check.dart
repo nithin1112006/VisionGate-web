@@ -168,10 +168,22 @@ class WifiChecker {
       return true;
     }
 
-    // On Web, browsers cannot inspect Wi-Fi SSID by security design;
-    // Web location is validated strictly by Geofence.
     if (kIsWeb) {
-      return true;
+      // On Web, check with backend whether the client IP originates from college network
+      try {
+        final url = '${CollegeIPConfig.defaultURL}/api/check_wifi';
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 4));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          return data['allowed'] == true || data['is_college_network'] == true;
+        }
+      } catch (e) {
+        debugPrint('[WIFI] Web network check failed: $e');
+        return false;
+      }
+      return false;
     }
 
     final isConnected = await isWifiConnected();
@@ -202,11 +214,15 @@ class WifiChecker {
       return 'Network check disabled. You can mark attendance from any network.';
     }
 
+    final requiredSSID = _getRequiredSSID();
+
     if (kIsWeb) {
-      return 'Web Network: Location verified via GPS Geofence.';
+      final onCollege = await isOnCollegeWifi();
+      return onCollege
+          ? 'Connected to College Network (Allowed network)'
+          : 'Please connect to $requiredSSID Wi-Fi network.';
     }
 
-    final requiredSSID = _getRequiredSSID();
     final isConnected = await isWifiConnected();
 
     if (!isConnected) {
@@ -235,7 +251,17 @@ class WifiChecker {
       return vpnError;
     }
 
-    if (AppSettings.allowAnyNetwork || kIsWeb) {
+    if (AppSettings.allowAnyNetwork) {
+      return null;
+    }
+
+    final requiredSSID = _getRequiredSSID();
+
+    if (kIsWeb) {
+      final isOnCollege = await isOnCollegeWifi();
+      if (!isOnCollege) {
+        return 'Please connect to the College Wi-Fi ("$requiredSSID") to mark attendance.';
+      }
       return null;
     }
 
@@ -247,7 +273,6 @@ class WifiChecker {
       }
 
       final ssid = await getCurrentWifiSSID();
-      final requiredSSID = _getRequiredSSID();
       if (ssid != null && ssid.isNotEmpty && ssid.toLowerCase() != requiredSSID.toLowerCase()) {
         return 'You are connected to "$ssid". Please connect to "$requiredSSID" to mark attendance.';
       }

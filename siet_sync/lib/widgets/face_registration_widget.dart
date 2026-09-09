@@ -1104,17 +1104,18 @@ class _FaceVerificationWidgetState extends State<FaceVerificationWidget> with Si
       }
 
       // WiFi check
-      if (!kIsWeb &&
-          CollegeIPConfig.isWifiCheckEnabled &&
+      if (CollegeIPConfig.isWifiCheckEnabled &&
           !AppSettings.allowAnyNetwork &&
           preVerif.wifiError != null) {
         setState(() {
           _statusMessage = "Error: ${preVerif.wifiError}";
         });
-        if (preVerif.wifiError!.contains("SSID") ||
-            preVerif.wifiError!.contains("location") ||
-            preVerif.wifiError!.contains("Location")) {
-          _showGeofenceWarningDialog("To verify WiFi connection, please turn on Location Services (GPS) and grant permission.");
+        if (!kIsWeb &&
+            (preVerif.wifiError!.contains("SSID") ||
+                preVerif.wifiError!.contains("location") ||
+                preVerif.wifiError!.contains("Location"))) {
+          _showGeofenceWarningDialog(
+              "To verify WiFi connection, please turn on Location Services (GPS) and grant permission.");
         }
         return;
       }

@@ -136,8 +136,8 @@ class FaceVerificationService {
       return {'success': false, 'error': preVerif.vpnError, 'vpn_blocked': true};
     }
 
-    // 2. WiFi/Network check (app only)
-    if (!kIsWeb && !AppSettings.allowAnyNetwork && preVerif.wifiError != null) {
+    // 2. WiFi/Network check
+    if (!AppSettings.allowAnyNetwork && preVerif.wifiError != null) {
       onError?.call(preVerif.wifiError!);
       return {'success': false, 'error': preVerif.wifiError, 'wifi_blocked': true};
     }
@@ -573,6 +573,18 @@ class FaceVerificationService {
       return {'success': false, 'error': preVerif.vpnError, 'vpn_blocked': true};
     }
 
+    // 2. WiFi/Network check
+    if (!AppSettings.allowAnyNetwork && preVerif.wifiError != null) {
+      onError?.call(preVerif.wifiError!);
+      return {'success': false, 'error': preVerif.wifiError, 'wifi_blocked': true};
+    }
+
+    // 3. Geofence check
+    if (preVerif.geoDecision != null && preVerif.geoDecision!.error != null) {
+      onError?.call(preVerif.geoDecision!.error!);
+      return {'success': false, 'error': preVerif.geoDecision!.error, 'geo_blocked': true};
+    }
+
     // On-device Google ML Kit edge pre-filter (fast mobile check)
     final prefilter = await ClientFacePreFilterService.evaluateImagePath(
       imageFile.path,
@@ -672,6 +684,18 @@ class FaceVerificationService {
     if (preVerif.vpnError != null) {
       onError?.call(preVerif.vpnError!);
       return {'success': false, 'error': preVerif.vpnError, 'vpn_blocked': true};
+    }
+
+    // 2. WiFi/Network check
+    if (!AppSettings.allowAnyNetwork && preVerif.wifiError != null) {
+      onError?.call(preVerif.wifiError!);
+      return {'success': false, 'error': preVerif.wifiError, 'wifi_blocked': true};
+    }
+
+    // 3. Geofence check
+    if (preVerif.geoDecision != null && preVerif.geoDecision!.error != null) {
+      onError?.call(preVerif.geoDecision!.error!);
+      return {'success': false, 'error': preVerif.geoDecision!.error, 'geo_blocked': true};
     }
 
     // On-device Google ML Kit edge pre-filter (fast mobile check)

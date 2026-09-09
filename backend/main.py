@@ -906,6 +906,8 @@ async def vpn_detection_middleware(request: Request, call_next):
     # Skip VPN check for settings, auth and public endpoints
     skip_paths = [
         "/settings/allow_any_network",
+        "/check_wifi",
+        "/api/check_wifi",
         "/admin/settings",
         "/api/login",
         "/api/auth",
@@ -1101,6 +1103,95 @@ def get_server_public_ip() -> str:
         except Exception as e:
             print(f"[IP Verify] Failed to fetch server public IP: {e}")
     return _cached_server_public_ip
+
+
+COLLEGE_STANDARD_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    # Sri Shakthi Institute of Engineering & Technology campus public egress subnets
+    ipaddress.ip_network("14.102.13.0/24"),
+    ipaddress.ip_network("110.172.151.0/24"),
+]
+
+
+def is_college_network_ip(client_ip: str) -> bool:
+    """Check if the given client IP originates from the authorized college network.
+
+    Returns True for:
+      - RFC-1918 private / loopback addresses (direct LAN / intranet)
+      - Sri Shakthi Institute public NAT egress subnets (14.102.13.0/24, 110.172.151.0/24)
+      - Campus server's dynamic public egress IP
+      - Any custom IPs/subnets configured in system_config or COLLEGE_NETWORK_IPS env var.
+    """
+    if not client_ip:
+        return False
+    try:
+        ip = ipaddress.ip_address(client_ip.strip())
+
+        # 1. Private RFC-1918 or loopback (LAN / local college WiFi)
+        if ip.is_private or ip.is_loopback:
+            return True
+
+        # 2. Sri Shakthi known campus public CIDRs
+        for net in COLLEGE_STANDARD_NETWORKS:
+            if ip in net:
+                return True
+
+        # 3. Dynamic server public egress IP (server is hosted on campus)
+        srv_pub = get_server_public_ip()
+        if srv_pub:
+            try:
+                if ip == ipaddress.ip_address(srv_pub.strip()):
+                    return True
+            except Exception:
+                pass
+
+        # 4. Custom configured college IPs / subnets from system_config or env
+        custom_ips = _app_settings.get("college_ips", "")
+        env_ips = os.environ.get("COLLEGE_NETWORK_IPS", "")
+        for part in f"{custom_ips},{env_ips}".split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                if "/" in part:
+                    if ip in ipaddress.ip_network(part, strict=False):
+                        return True
+                else:
+                    if ip == ipaddress.ip_address(part):
+                        return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return False
+
+
+def check_wifi(request: Request):
+    """Enforce college-network-only access when WiFi restriction is enabled.
+
+    Applies to ALL clients (both mobile app and web).
+    When WiFi is required (allow_any_network is False), clients must
+    originate from an authorized college network IP.
+    """
+    # Skip if WiFi requirement is disabled (allow_any_network is True)
+    if _app_settings.get("allow_any_network", True):
+        return
+
+    client_ip = get_client_ip(request)
+    if is_college_network_ip(client_ip):
+        return
+
+    college_ssid = _app_settings.get("college_ssid", "") or "LifeatSriShakthi"
+    raise HTTPException(
+        status_code=403,
+        detail=f"Access denied. You must be connected to the college WiFi network ('{college_ssid}') to mark attendance.",
+    )
+
 
 def _enforce_web_geofence(form: dict, client_ip: str) -> bool:
     """Enforce geo-fence rules for web and app clients independently based on settings.
@@ -1378,6 +1469,12 @@ async def update_settings(request: Request):
                 _app_settings["college_ssid"] = new_value
                 save_system_config("college_ssid", new_value)
                 changes.append(f"College SSID updated to '{new_value}'")
+        if "college_ips" in body:
+            new_value = str(body["college_ips"]).strip()
+            if _app_settings.get("college_ips", "") != new_value:
+                _app_settings["college_ips"] = new_value
+                save_system_config("college_ips", new_value)
+                changes.append(f"College IP ranges updated")
         if "enforce_geo_fence" in body:
             new_value = bool(body["enforce_geo_fence"])
             if _app_settings.get("enforce_geo_fence", True) != new_value:
@@ -1608,6 +1705,29 @@ async def check_vpn(request: Request):
         "vpn_detected": vpn_detected,
         "client_ip": client_ip,
         "message": "VPN detected" if vpn_detected else "No VPN detected",
+    }
+
+
+@app.get("/check_wifi")
+@app.get("/api/check_wifi")
+async def check_wifi_status_endpoint(request: Request):
+    """Check if the requesting client is connected to the authorized college network."""
+    client_ip = get_client_ip(request)
+    allow_any = _app_settings.get("allow_any_network", True)
+    college_ssid = _app_settings.get("college_ssid", "") or "LifeatSriShakthi"
+    is_college = is_college_network_ip(client_ip)
+
+    return {
+        "wifi_required": not allow_any,
+        "is_college_network": is_college,
+        "client_ip": client_ip,
+        "college_ssid": college_ssid,
+        "allowed": allow_any or is_college,
+        "message": (
+            "Connected to College Network"
+            if is_college
+            else f"Not connected to College Network ('{college_ssid}')"
+        ),
     }
 
 
@@ -10354,51 +10474,7 @@ def get_insightface_app():
         return face_app
     return None
 
-# -------------------------------------------------
-# WIFI / IP RESTRICTION
-# -------------------------------------------------
-# No IP restriction - server accessible from any network (public/ngrok)
-ALLOWED_IP_PREFIX = None
-
-
-def check_wifi(request: Request):
-    """Enforce college-network-only access when WiFi restriction is enabled.
-
-    Applies to app clients only — web clients rely on geofence for location
-    enforcement instead.  The Flutter app sends the X-Client-Platform header
-    so this function can distinguish web vs app requests.
-
-    When WiFi is required (allow_any_network is False), app clients must
-    originate from a private/RFC-1918 IP address (college intranet).  If the
-    server is reached via a Cloudflare tunnel the real client IP is taken from
-    the CF-Connecting-IP / X-Forwarded-For headers by get_client_ip().
-    """
-    # Skip if WiFi requirement is disabled (admin toggled off)
-    if _app_settings.get("allow_any_network", True):
-        return
-
-    # Identify platform — Flutter app sends X-Client-Platform: app
-    # Web browser clients send X-Client-Platform: web (or no header)
-    platform = request.headers.get("X-Client-Platform", "app").lower()
-
-    # Web clients are exempt from WiFi check — they use geofence instead
-    if platform == "web":
-        return
-
-    # App clients must be on the college local network (private IP)
-    client_ip = get_client_ip(request)
-    try:
-        ip_obj = ipaddress.ip_address(client_ip)
-        if ip_obj.is_private or ip_obj.is_loopback:
-            return  # On local / college network — allow
-    except Exception:
-        pass
-
-    # Client has a public IP — not on the college WiFi
-    raise HTTPException(
-        status_code=403,
-        detail="Access denied. You must be connected to the college WiFi network to mark attendance.",
-    )
+# Note: check_wifi is canonically defined above alongside _enforce_web_geofence
 
 
 # -------------------------------------------------
@@ -11287,11 +11363,10 @@ async def mark_attendance_secure(
         "reg_no": reg_no
     }
 
-    # Run geofence first — if it's enabled and passes, WiFi check is redundant
+    # Run both geofence and WiFi checks independently
     try:
-        geofence_active = _enforce_web_geofence(validation_form, get_client_ip(request))
-        if not geofence_active:
-            check_wifi(request)
+        _enforce_web_geofence(validation_form, get_client_ip(request))
+        check_wifi(request)
     except HTTPException as e:
         if reg_no:
             record_failed_attempt(reg_no)
@@ -12317,9 +12392,9 @@ async def admin_mark_attendance(request: Request, image: UploadFile = File(...))
         "client_lng": lng,
         "reg_no": reg_no
     }
-    # Geofence first — if active and passes, WiFi check is redundant
-    if not _enforce_web_geofence(validation_form, get_client_ip(request)):
-        check_wifi(request)
+    # Run both geofence and WiFi checks independently
+    _enforce_web_geofence(validation_form, get_client_ip(request))
+    check_wifi(request)
 
     # Get the image
     img_bytes = await image.read()
@@ -12449,9 +12524,9 @@ async def hod_mark_attendance(request: Request, image: UploadFile = File(...)):
         "client_lng": lng,
         "reg_no": reg_no
     }
-    # Geofence first — if active and passes, WiFi check is redundant
-    if not _enforce_web_geofence(validation_form, get_client_ip(request)):
-        check_wifi(request)
+    # Run both geofence and WiFi checks independently
+    _enforce_web_geofence(validation_form, get_client_ip(request))
+    check_wifi(request)
 
     # Get the image
     img_bytes = await image.read()
@@ -22035,9 +22110,9 @@ async def other_staff_mark_attendance(request: Request):
         "reg_no": staff_user["reg_no"]
     }
 
-    # Geofence first — if active and passes, WiFi check is redundant
-    if not _enforce_web_geofence(validation_form, client_ip):
-        check_wifi(request)
+    # Run both geofence and WiFi checks independently
+    _enforce_web_geofence(validation_form, client_ip)
+    check_wifi(request)
 
     cursor.execute("""
         SELECT slot_number, start_time, duration_minutes, is_enabled, slot_type, slot_half
