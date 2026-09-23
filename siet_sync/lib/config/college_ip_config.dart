@@ -238,18 +238,11 @@ class CollegeIPConfig {
   ///
   static const List<Map<String, dynamic>> collegeIPs = [
     {
-      'ip': '127.0.0.1',
-      'port': 8001,
-      'location': 'Local Machine',
-      'name': 'Localhost Server',
-      'isDefault': true,
-    },
-    {
       'ip': '192.168.137.1',
       'port': 8001,
       'location': 'USB Tethering',
       'name': 'Mobile Hotspot',
-      'isDefault': false,
+      'isDefault': true,
     },
     {
       'ip': '192.168.1.100',

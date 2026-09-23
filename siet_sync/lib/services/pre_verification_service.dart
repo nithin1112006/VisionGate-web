@@ -168,9 +168,9 @@ class PreVerificationService {
         vpnError = await VpnChecker.validateVpnStatus();
       }
 
-      // ── 2. WiFi check (all platforms) ────────────────────────────────────
+      // ── 2. WiFi check (native app only — web uses geofence) ──────────────
       String? wifiError;
-      if (!AppSettings.allowAnyNetwork) {
+      if (!kIsWeb && !AppSettings.allowAnyNetwork) {
         wifiError = await WifiChecker.validateCollegeWifi();
       }
 
